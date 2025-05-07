@@ -6,7 +6,7 @@
  * Settings related to the system prompt or instructions for Gemini.
  */
 export interface PromptSystemSettings {
-    systemInstruction?: string; // Gemini system instruction
+    systemInstruction?: string | null;
     // Add other prompt-specific settings here
 }
 
@@ -15,14 +15,15 @@ export interface PromptSystemSettings {
  * safety settings, and feature flags.
  */
 export interface GeneralUserSettings {
-    geminiModel?: string; // Preferred Gemini model
-    temperature?: number; // Gemini temperature
-    maxOutputTokens?: number; // Gemini max output tokens
+    geminiModel?: string | null;
+    temperature?: number | null;
+    maxOutputTokens?: number | null;
+    maxOutputTokens?: number | null; // Gemini max output tokens, allow null
     safetySettings?: Array<{ // For Gemini safety settings
         category: string; // e.g., "HARM_CATEGORY_SEXUALLY_EXPLICIT"
         threshold: string; // e.g., "BLOCK_MEDIUM_AND_ABOVE"
-    }>;
-    googleSearchEnabled?: boolean; // Flag to enable Google Search tool if available
+    }> | null;
+    googleSearchEnabled?: boolean | null;
     // Add other general settings here
 }
 

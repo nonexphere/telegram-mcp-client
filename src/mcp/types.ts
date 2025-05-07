@@ -10,8 +10,9 @@ export interface MCPConfig {
   type: 'stdio' | 'http'; // Transport type
   command?: string; // For stdio
   args?: string[]; // For stdio
-  url?: string; // For http
   env?: { [key: string]: string | undefined }; // Environment variables for stdio
+  cwd?: string; 
+  url?: string; // For http
   // Add other config properties if needed
 }
 
@@ -24,8 +25,9 @@ export interface MCPConfigWithOptionalName {
   type: 'stdio' | 'http';
   command?: string;
   args?: string[];
-  url?: string;
   env?: { [key: string]: string | undefined };
+  cwd?: string; 
+  url?: string;
 }
 
 // You might also want types for MCP tools, resources, etc., but

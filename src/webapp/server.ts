@@ -8,11 +8,12 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import crypto from 'crypto';
 import type { PrismaClient, Prisma } from '@prisma/client';
+
 import { McpClientManager } from '../mcp/mcpClientManager.js';
 import { GeminiClient } from '../gemini/geminiClient.js';
 import { ConversationManager } from '../context/conversation.js';
-import { getMcpConfigStorage } from '../mcp/storage.js';
-import { UserConfiguration } from '../context/types.js';
+import { getMcpConfigStorage, McpConfigStorage } from '../mcp/storage.js'; // Import McpConfigStorage class directly for explicit typing
+import { UserConfiguration, GeneralUserSettings, PromptSystemSettings } from '../context/types.js'; // Import specific types
 import { MCPConfig } from '../mcp/types.js';
 import { z } from 'zod';
 
@@ -22,14 +23,91 @@ const __dirname = dirname(__filename);
 
 // --- Zod Schemas for Validation ---
 const SafetySettingSchema = z.object({
-    category: z.string(), // Ideally use z.enum with HarmCategory values
-    threshold: z.string(), // Ideally use z.enum with HarmBlockThreshold values
+    category: z.string(), // Ideally use z.enum with HarmCategory values from @google/genai
+    threshold: z.string(), // Ideally use z.enum with HarmBlockThreshold values from @google/genai
 });
+
+// Define schemas for nested settings objects to allow passthrough but validate known fields
+const PromptSystemSettingsSchema = z.object({
+    systemInstruction: z.string().optional().nullable(),
+}).passthrough(); // Allows other fields
+
+const GeneralUserSettingsSchema = z.object({
+    geminiModel: z.string().optional().nullable(),
+    temperature: z.number().min(0).max(2).optional().nullable(), // Gemini supports up to 2.0
+    maxOutputTokens: z.number().int().positive().optional().nullable(),
+    safetySettings: z.array(SafetySettingSchema).optional().nullable(),
+    googleSearchEnabled: z.boolean().optional().nullable(),
+}).passthrough(); // Allows other fields
+
+// Main payload schema combining nested schemas
 const UserSettingsPayloadSchema = z.object({
     geminiApiKey: z.string().optional().nullable(),
-    promptSystemSettings: z.object({ systemInstruction: z.string().optional().nullable() }).passthrough().optional().nullable(),
-    generalSettings: z.object({ geminiModel: z.string().optional().nullable(), temperature: z.number().min(0).max(1).optional().nullable(), safetySettings: z.array(SafetySettingSchema).optional().nullable(), googleSearchEnabled: z.boolean().optional().nullable() }).passthrough().optional().nullable(),
-}).passthrough();
+    promptSystemSettings: PromptSystemSettingsSchema.optional().nullable(),
+    generalSettings: GeneralUserSettingsSchema.optional().nullable(),
+}).passthrough(); // Allow other top-level fields if necessary
+
+// MCP Config Schema
+const MCPConfigSchema = z.object({
+    name: z.string().min(1, "Server name is required"),
+    type: z.enum(['stdio', 'http']),
+    command: z.string().optional(),
+    args: z.array(z.string()).optional(),
+    url: z.string().url("Invalid URL format").optional(),
+    env: z.record(z.string().optional()).optional(),
+    cwd: z.string().optional(), // Add cwd if needed
+}).refine(data => {
+    if (data.type === 'stdio' && !data.command) {
+        return false; // Command is required for stdio
+    }
+    if (data.type === 'http' && !data.url) {
+        return false; // URL is required for http
+    }
+    return true;
+}, {
+    message: "Command is required for stdio type, URL is required for http type",
+    path: ["command", "url"], // You might adjust the path depending on how you want the error reported
+});
+
+
+// --- Encryption (copied from storage for direct use here, consider sharing utils) ---
+const ALGORITHM = 'aes-256-cbc';
+let ENCRYPTION_KEY: Buffer | null = null;
+let ENCRYPTION_IV: Buffer | null = null;
+const API_KEY_ENCRYPTION_ENABLED = process.env.API_KEY_ENCRYPTION_ENABLED !== 'false';
+
+if (API_KEY_ENCRYPTION_ENABLED) {
+    if (process.env.ENCRYPTION_KEY) {
+        if (process.env.ENCRYPTION_KEY.length === 64 && /^[0-9a-fA-F]+$/.test(process.env.ENCRYPTION_KEY)) {
+            ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
+        } else {
+            console.error('ERROR: ENCRYPTION_KEY is set but not a 64-character hex string. API keys will not be securely encrypted.');
+        }
+    }
+    if (process.env.ENCRYPTION_IV) {
+        if (process.env.ENCRYPTION_IV.length === 32 && /^[0-9a-fA-F]+$/.test(process.env.ENCRYPTION_IV)) {
+            ENCRYPTION_IV = Buffer.from(process.env.ENCRYPTION_IV, 'hex');
+        } else {
+            console.error('ERROR: ENCRYPTION_IV is set but not a 32-character hex string. API keys will not be securely encrypted.');
+        }
+    }
+}
+function encrypt(text: string): string {
+    if (!text) return text;
+    if (!API_KEY_ENCRYPTION_ENABLED || !ENCRYPTION_KEY || !ENCRYPTION_IV) {
+        // Warnings are logged in storage/client constructors
+        return text; // Store plaintext
+    }
+    try {
+        const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, ENCRYPTION_IV);
+        let encrypted = cipher.update(text, 'utf8', 'hex');
+        encrypted += cipher.final('hex');
+        return encrypted;
+    } catch (error) {
+        console.error("Encryption failed, storing plaintext as fallback:", error);
+        return text;
+    }
+}
 
 // --- Server Setup Function ---
 
@@ -40,18 +118,19 @@ const UserSettingsPayloadSchema = z.object({
  * @param mcpClientManager - The McpClientManager instance.
  * @param geminiClient - The GeminiClient instance.
  * @param conversationManager - The ConversationManager instance.
+ * @param adminUserIds - Array of admin user IDs allowed to manage stdio servers.
  */
 export function setupWebAppServer(
     app: Application,
     db: PrismaClient, 
     mcpClientManager: McpClientManager,
-    geminiClient: GeminiClient,
+    geminiClient: GeminiClient, // Keep geminiClient if needed for other API endpoints
     conversationManager: ConversationManager,
     adminUserIds: number[]
 ): void {
-    const mcpConfigStorage = getMcpConfigStorage(db); 
+    const mcpConfigStorage: McpConfigStorage = getMcpConfigStorage(db); // Get typed instance
     const publicPath = join(__dirname, 'public');
-    app.use(express.static(publicPath));
+    app.use(express.static(publicPath)); // Serve static files (HTML, CSS, JS)
     console.log(`Serving static files from: ${publicPath}`);
 
     /**
@@ -82,16 +161,19 @@ export function setupWebAppServer(
             return res.status(401).send('Unauthorized: Invalid Telegram InitData');
         }
 
+        // Attach validated user info and admin status to the request object
         (req as any).telegramUserId = user.id;
         (req as any).telegramUser = user; 
-        console.log(`Validated Mini App request for user ID: ${user.id}`);
-        // Anexar status de admin ao request para uso nos endpoints
-        (req as any).isAdmin = adminUserIds.includes(user.id);
+        (req as any).isAdmin = adminUserIds.includes(user.id); // Check if user is admin
+        console.log(`Validated Mini App request for user ID: ${user.id}, isAdmin: ${(req as any).isAdmin}`);
+        next(); // Proceed to the next middleware/handler
         next();
     };
 
     // Apply the validation middleware to all /api routes.
     app.use('/api', validateTelegramInitDataMiddleware);
+
+    // --- API Endpoints ---
 
     app.get('/api/user_config', async (req: Request, res: Response) => {
         /**
@@ -99,18 +181,27 @@ export function setupWebAppServer(
          * @group API - Mini App Backend
          * @summary Retrieves the user's current settings and MCP configurations.
          * @security TelegramInitData
-         * @returns {object} 200 - An object containing 'settings' and 'mcps'.
+         * @returns {object} 200 - An object containing 'settings', 'mcps', and 'isAdmin'.
          * @returns {object} 500 - Internal server error.
          */
         const userId = (req as any).telegramUserId;
-        const isAdmin = (req as any).isAdmin; // Obtenha o status de admin
+        const isAdmin = (req as any).isAdmin;
         try {
-            const userConfig = await mcpConfigStorage.getUserConfiguration(userId);
+            // Use mcpConfigStorage to get user configuration
+            const userConfigResult = await mcpConfigStorage.getUserConfiguration(userId);
             const mcpConfigs = await mcpConfigStorage.getUserMcpConfigs(userId);
+
+             const settingsResponse: UserConfiguration = {
+                 userId: userId,
+                 geminiApiKey: userConfigResult?.geminiApiKey ?? undefined,
+                 promptSystemSettings: userConfigResult?.promptSystemSettings ?? {},
+                 generalSettings: userConfigResult?.generalSettings ?? {},
+             };
+
             res.json({
-                settings: userConfig || { userId: userId, promptSystemSettings: {}, generalSettings: {} },
+                settings: settingsResponse,
                 mcps: mcpConfigs,
-                isAdmin: isAdmin // Envie o status de admin para o frontend
+                isAdmin: isAdmin // Send admin status to the frontend
             });
         } catch (error: any) {
             console.error(`Error getting user config for user ${userId}:`, error.message);
@@ -124,73 +215,117 @@ export function setupWebAppServer(
          * @group API - Mini App Backend
          * @summary Saves or updates the user's general settings (API key, model, etc.).
          * @security TelegramInitData
+         * @param {object} request.body.required - User settings payload.
          * @returns {object} 200 - Success message.
          * @returns {object} 400 - Invalid payload format.
          * @returns {object} 500 - Internal server error.
          */
         const userId = (req as any).telegramUserId;
+        let existingConfig: UserConfiguration | null = null; // FIX: Declare existingConfig outside try
+
         try {
             // Validate payload with Zod
             const validationResult = UserSettingsPayloadSchema.safeParse(req.body);
             if (!validationResult.success) {
                 console.warn(`Invalid user settings payload for user ${userId}:`, validationResult.error.errors);
-                return res.status(400).json({ error: 'Invalid settings format.', details: validationResult.error.errors });
+                return res.status(400).json({ error: 'Invalid settings format.', details: validationResult.error.flatten() });
             }
             const updatedSettingsBody = validationResult.data;
 
-            const existingConfig = await mcpConfigStorage.getUserConfiguration(userId) || {
-                userId: userId,
-                promptSystemSettings: {},
-                generalSettings: {}
-            };
+            existingConfig = await mcpConfigStorage.getUserConfiguration(userId); // FIX: Assign fetched config
+            const currentApiKey = existingConfig?.geminiApiKey;
 
-            // Construct the final configuration object.
-            // The McpConfigStorage.saveUserConfiguration method will handle stringifying the settings objects.
-            const finalConfig: UserConfiguration = {
-                userId: userId,
-                geminiApiKey: updatedSettingsBody.geminiApiKey !== undefined ? updatedSettingsBody.geminiApiKey : existingConfig?.geminiApiKey,
-                promptSystemSettings: {
-                    ...(existingConfig.promptSystemSettings || {}), // Base
-                    // Explicitly handle known fields from payload (null -> undefined), or if payload undefined, use base (which is existing)
-                    systemInstruction: updatedSettingsBody.promptSystemSettings?.systemInstruction === null 
-                        ? undefined 
-                        : (updatedSettingsBody.promptSystemSettings?.systemInstruction ?? existingConfig.promptSystemSettings?.systemInstruction),
-                    // Passthrough: spread payload fields that are not null and not already explicitly handled
-                    ...(updatedSettingsBody.promptSystemSettings 
-                        ? Object.fromEntries(Object.entries(updatedSettingsBody.promptSystemSettings).filter(([k,v]) => v !== null && k !== 'systemInstruction')) 
-                        : {}),
-                },
-                generalSettings: {
-                    ...(existingConfig.generalSettings || {}), // Base
-                    // Explicitly handle known fields
-                    geminiModel: updatedSettingsBody.generalSettings?.geminiModel === null 
-                        ? undefined 
-                        : (updatedSettingsBody.generalSettings?.geminiModel ?? existingConfig.generalSettings?.geminiModel),
-                    temperature: updatedSettingsBody.generalSettings?.temperature === null 
-                        ? undefined 
-                        : (updatedSettingsBody.generalSettings?.temperature ?? existingConfig.generalSettings?.temperature),
-                    safetySettings: updatedSettingsBody.generalSettings?.safetySettings === null 
-                        ? undefined 
-                        : (updatedSettingsBody.generalSettings?.safetySettings ?? existingConfig.generalSettings?.safetySettings),
-                    googleSearchEnabled: updatedSettingsBody.generalSettings?.googleSearchEnabled === null 
-                        ? undefined 
-                        : (updatedSettingsBody.generalSettings?.googleSearchEnabled ?? existingConfig.generalSettings?.googleSearchEnabled),
-                    // Passthrough: spread payload fields that are not null and not already explicitly handled
-                    ...(updatedSettingsBody.generalSettings 
-                        ? Object.fromEntries(Object.entries(updatedSettingsBody.generalSettings).filter(([k,v]) => v !== null && !['geminiModel', 'temperature', 'safetySettings', 'googleSearchEnabled'].includes(k))) 
-                        : {}),
-                },
+            const mergedPromptSettings: PromptSystemSettings = {
+                ...(existingConfig?.promptSystemSettings ?? {}),
+                ...(updatedSettingsBody.promptSystemSettings ?? {})
             };
-
-            // If systemInstruction is explicitly set to null or undefined in the payload,
-            // ensure it's removed from the object before saving, so it doesn't become "null" string inside JSON.
-            // Note: `saveUserConfiguration` will store `null` in DB if the whole settings object is empty.
-            if (finalConfig.promptSystemSettings && 
-                (finalConfig.promptSystemSettings.systemInstruction === null || finalConfig.promptSystemSettings.systemInstruction === undefined)) {
-                delete finalConfig.promptSystemSettings.systemInstruction;
+            if (updatedSettingsBody.promptSystemSettings && 'systemInstruction' in updatedSettingsBody.promptSystemSettings) {
+                 // Preserve null if provided, otherwise it's string or undefined
+                 mergedPromptSettings.systemInstruction = updatedSettingsBody.promptSystemSettings.systemInstruction;
             }
 
-            await mcpConfigStorage.saveUserConfiguration(finalConfig);
+
+            const mergedGeneralSettings: GeneralUserSettings = {
+                ...(existingConfig?.generalSettings ?? {}),
+                ...(updatedSettingsBody.generalSettings ?? {}),
+            }; // Ensure all existing fields are carried over if not in updatedSettingsBody
+
+            // Handle explicit null/undefined for specific general settings fields
+             if (updatedSettingsBody.generalSettings && 'geminiModel' in updatedSettingsBody.generalSettings) {
+                 mergedGeneralSettings.geminiModel = updatedSettingsBody.generalSettings.geminiModel;
+             } else if (existingConfig?.generalSettings?.geminiModel === null && !(updatedSettingsBody.generalSettings && 'geminiModel' in updatedSettingsBody.generalSettings)) {
+                mergedGeneralSettings.geminiModel = undefined; // Ensure explicit null from DB becomes undefined if not overwritten
+            }
+
+            if (updatedSettingsBody.generalSettings && 'temperature' in updatedSettingsBody.generalSettings) { // Check existence of temperature in payload
+                 mergedGeneralSettings.temperature = updatedSettingsBody.generalSettings.temperature;
+            } else if (existingConfig?.generalSettings?.temperature === null && !(updatedSettingsBody.generalSettings && 'temperature' in updatedSettingsBody.generalSettings)) {
+                mergedGeneralSettings.temperature = undefined; // Ensure explicit null from DB becomes undefined
+            }
+
+             if (updatedSettingsBody.generalSettings && 'maxOutputTokens' in updatedSettingsBody.generalSettings) {
+                mergedGeneralSettings.maxOutputTokens = updatedSettingsBody.generalSettings.maxOutputTokens;
+            } else if (existingConfig?.generalSettings?.maxOutputTokens === null && !(updatedSettingsBody.generalSettings && 'maxOutputTokens' in updatedSettingsBody.generalSettings)) {
+                mergedGeneralSettings.maxOutputTokens = undefined;
+            }
+
+            if (updatedSettingsBody.generalSettings && 'safetySettings' in updatedSettingsBody.generalSettings) { // Check existence of safetySettings in payload
+                mergedGeneralSettings.safetySettings = updatedSettingsBody.generalSettings.safetySettings;
+            } else if (existingConfig?.generalSettings?.safetySettings === null && !(updatedSettingsBody.generalSettings && 'safetySettings' in updatedSettingsBody.generalSettings)) {
+                mergedGeneralSettings.safetySettings = undefined; // Ensure explicit null from DB becomes undefined
+            }
+
+             if (updatedSettingsBody.generalSettings && 'googleSearchEnabled' in updatedSettingsBody.generalSettings) {
+                mergedGeneralSettings.googleSearchEnabled = updatedSettingsBody.generalSettings.googleSearchEnabled;
+            } else if (existingConfig?.generalSettings?.googleSearchEnabled === null && !(updatedSettingsBody.generalSettings && 'googleSearchEnabled' in updatedSettingsBody.generalSettings)) {
+                mergedGeneralSettings.googleSearchEnabled = false; // Default to false if null and not in payload
+            }
+
+            let apiKeyToSave: string | undefined | null = currentApiKey; // Default to existing
+            if (updatedSettingsBody.geminiApiKey !== undefined) { // If key is present in payload (even if null)
+                 apiKeyToSave = updatedSettingsBody.geminiApiKey; // This could be null
+                 if (apiKeyToSave) { // Only encrypt if it's a non-null string
+                     apiKeyToSave = encrypt(apiKeyToSave); // encrypt is defined in this file
+                 }
+            }
+
+            // Prepare data for Prisma upsert, handling potential nulls correctly
+            const dataForUpdate: Prisma.UserConfigUpdateInput = {};
+            const dataForCreate: Prisma.UserConfigCreateInput = { userId };
+
+            // Explicitly handle undefined vs null for API key
+            if (apiKeyToSave === null) { // User wants to clear the key
+                dataForUpdate.geminiApiKey = null;
+                dataForCreate.geminiApiKey = null;
+            } else if (apiKeyToSave !== undefined) { // User provided a new key (already encrypted if non-null)
+                dataForUpdate.geminiApiKey = apiKeyToSave;
+                dataForCreate.geminiApiKey = apiKeyToSave;
+            }
+            // For other settings, convert to JSON string or null if empty/undefined
+            const promptSettingsString = (mergedPromptSettings && Object.keys(mergedPromptSettings).length > 0 && (mergedPromptSettings.systemInstruction !== undefined && mergedPromptSettings.systemInstruction !== null && mergedPromptSettings.systemInstruction !== ''))
+                ? JSON.stringify(mergedPromptSettings) : null;
+            dataForUpdate.promptSystemSettings = promptSettingsString;
+            dataForCreate.promptSystemSettings = promptSettingsString;
+
+            const generalSettingsString = (mergedGeneralSettings && Object.keys(mergedGeneralSettings).length > 0 &&
+                (
+                    (mergedGeneralSettings.geminiModel !== undefined && mergedGeneralSettings.geminiModel !== null && mergedGeneralSettings.geminiModel !== '') ||
+                    (mergedGeneralSettings.temperature !== undefined && mergedGeneralSettings.temperature !== null) ||
+                    (mergedGeneralSettings.maxOutputTokens !== undefined && mergedGeneralSettings.maxOutputTokens !== null) ||
+                    (mergedGeneralSettings.safetySettings !== undefined && mergedGeneralSettings.safetySettings !== null) ||
+                    (mergedGeneralSettings.googleSearchEnabled !== undefined && mergedGeneralSettings.googleSearchEnabled !== null)
+                )
+            ) ? JSON.stringify(mergedGeneralSettings) : null;
+            dataForUpdate.generalSettings = generalSettingsString;
+            dataForCreate.generalSettings = generalSettingsString;
+
+            await db.userConfig.upsert({
+                where: { userId: userId },
+                update: dataForUpdate,
+                create: dataForCreate,
+            });
+            console.log(`Saved user configuration for user ${userId}.`);
+
             res.json({ success: true, message: 'Settings saved successfully.' });
         } catch (error: any) {
             console.error(`Error saving user settings for user ${userId}:`, error.message);
@@ -204,33 +339,43 @@ export function setupWebAppServer(
          * @group API - Mini App Backend
          * @summary Adds or updates an MCP server configuration for the user.
          * @security TelegramInitData
+         * @param {MCPConfig} request.body.required - MCP server configuration.
          * @returns {object} 200 - Success message.
-         * @returns {object} 400 - Invalid payload format or disallowed stdio command.
+         * @returns {object} 400 - Invalid payload format.
+         * @returns {object} 403 - Forbidden (non-admin trying to add stdio).
          * @returns {object} 500 - Internal server error.
          */
         const userId = (req as any).telegramUserId;
         const isAdmin = (req as any).isAdmin;
-        const config: MCPConfig = req.body;
 
         try {
-            if (!config.name || !config.type) {
-                return res.status(400).json({ error: 'MCP config name and type are required.'});
+            // Validate payload with Zod
+            const validationResult = MCPConfigSchema.safeParse(req.body);
+            if (!validationResult.success) {
+                console.warn(`Invalid MCP config payload for user ${userId}:`, validationResult.error.errors);
+                return res.status(400).json({ error: 'Invalid MCP configuration format.', details: validationResult.error.flatten() });
             }
+            const config: MCPConfig = validationResult.data; // Use validated data
 
-            // *** INÍCIO DA VERIFICAÇÃO DE PERMISSÃO ***
+            // *** Permission Check for stdio ***
             if (config.type === 'stdio' && !isAdmin) {
                 console.warn(`User ${userId} (not admin) attempted to add stdio MCP server "${config.name}". Denied.`);
                 return res.status(403).json({ error: "Forbidden: Only administrators can add 'stdio' type MCP servers." });
             }
-            // *** FIM DA VERIFICAÇÃO DE PERMISSÃO ***
 
-            await mcpConfigStorage.saveUserMcpConfig(userId, config);
-            await mcpClientManager.addServer(userId, config); 
-            console.log(`User ${userId} successfully added ${config.type} MCP server "${config.name}".`);
-            res.json({ success: true, message: `MCP server "${config.name}" added.` });
+            // Use the manager to add/update the server (which also saves to DB via storage)
+            await mcpClientManager.addServer(userId, config);
+            console.log(`User ${userId} successfully added/updated ${config.type} MCP server "${config.name}".`);
+            res.json({ success: true, message: `MCP server "${config.name}" saved.` });
         } catch (error: any) {
-            console.error(`Error adding MCP config for user ${userId}:`, error.message);
-            res.status(500).json({ error: error.message || 'Failed to add MCP server config.' });
+            console.error(`Error adding/updating MCP config for user ${userId}:`, error.message);
+            // Distinguish between validation errors (already handled) and other errors
+             if (res.headersSent) return; // Avoid sending multiple responses
+             if (error.message.includes("Invalid MCP configuration format")) { // Check if it's our specific validation error message
+                 res.status(400).json({ error: error.message });
+             } else {
+                res.status(500).json({ error: error.message || 'Failed to save MCP server config.' });
+             }
         }
     });
 
@@ -242,6 +387,7 @@ export function setupWebAppServer(
          * @param {string} serverName.path.required - The name of the server configuration to delete.
          * @security TelegramInitData
          * @returns {object} 200 - Success message.
+         * @returns {object} 400 - Bad Request (missing server name).
          * @returns {object} 500 - Internal server error.
          */
         const userId = (req as any).telegramUserId;
@@ -250,8 +396,8 @@ export function setupWebAppServer(
             return res.status(400).json({ error: 'Server name is required.' });
         }
         try {
-            await mcpConfigStorage.deleteUserMcpConfig(userId, serverName);
-            await mcpClientManager.removeServer(userId, serverName); 
+             // Use the manager to remove the server (which also deletes from DB via storage)
+            await mcpClientManager.removeServer(userId, serverName, true); // Ensure DB remove is triggered
             res.json({ success: true, message: `MCP server "${serverName}" deleted.` });
         } catch (error: any) {
             console.error(`Error deleting MCP config "${serverName}" for user ${userId}:`, error.message);
@@ -264,14 +410,21 @@ export function setupWebAppServer(
          * @route POST /api/clear_history
          * @group API - Mini App Backend
          * @summary Clears the chat history for the current user.
+         * @summary Clears the chat history for the current user in their private chat with the bot.
          * @security TelegramInitData
          * @returns {object} 200 - Success message.
+         * @returns {object} 400 - Bad Request (chat ID not found).
          * @returns {object} 500 - Internal server error.
          */
         const userId = (req as any).telegramUserId; 
-        const chatId = (req as any).telegramUser?.id; 
+        // NOTE: Clearing history typically makes sense in the context of a specific CHAT.
+        // If the Mini App is launched from a private chat, user.id IS the chat.id.
+        // If launched from a group, you might need the chat ID from initData if available and intended.
+        // Assuming Mini App is primarily for private chat settings:
+        const chatId = (req as any).telegramUser?.id; // Use user ID as chat ID for private chats
 
-        if(!chatId) {
+        if (!chatId) { // Should always have chatId if validation passed
+            console.error(`Could not determine chat ID for user ${userId} to clear history.`);
             return res.status(400).json({ error: 'Chat ID not found for clearing history.' });
         }
 
@@ -283,6 +436,12 @@ export function setupWebAppServer(
             res.status(500).json({ error: 'Failed to clear chat history. Please check server logs.' });
         }
     });
+
+    // Fallback for any other route - serve index.html (useful for single-page apps)
+    // Ensure this is after all specific API routes
+    app.get('*', (req, res) => {
+        res.sendFile(join(publicPath, 'index.html'));
+    });
 }
 
 /**
@@ -293,33 +452,65 @@ export function setupWebAppServer(
  * @returns An object containing `isValid` (boolean) and optionally the parsed `user` object.
  */
 function isValidTelegramAuth(initData: string, botToken: string): { isValid: boolean, user?: any } {
-  if (!initData || !botToken) {
-    return { isValid: false };
-  }
-
-  const params = new URLSearchParams(initData);
-  const hash = params.get('hash');
-  params.delete('hash'); 
-
-  const dataCheckArr: string[] = [];
-  const sortedKeys = Array.from(params.keys()).sort();
-  for (const key of sortedKeys) {
-    dataCheckArr.push(`${key}=${params.get(key)}`);
-  }
-  const dataCheckString = dataCheckArr.join('\n');
-
-  const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
-  const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
-
-  const userParam = params.get('user');
-  let user;
-  if (userParam) {
-    try {
-      user = JSON.parse(userParam);
-    } catch (e) {
-      console.warn("Failed to parse user data from initData");
+    if (!initData || !botToken) {
+        console.warn("isValidTelegramAuth called with missing initData or botToken");
+        return { isValid: false };
     }
-  }
 
-  return { isValid: calculatedHash === hash, user };
+    try {
+        const params = new URLSearchParams(initData);
+        const hash = params.get('hash');
+        if (!hash) {
+            console.warn("initData missing hash parameter");
+            return { isValid: false };
+        }
+        params.delete('hash'); // hash should not be part of the data check string
+
+        const dataCheckArr: string[] = [];
+        // Sort keys alphabetically before joining
+        const sortedKeys = Array.from(params.keys()).sort();
+        for (const key of sortedKeys) {
+            dataCheckArr.push(`${key}=${params.get(key)}`);
+        }
+        const dataCheckString = dataCheckArr.join('\n');
+
+        // Create the secret key
+        const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+
+        // Calculate the hash
+        const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+        // Compare calculated hash with the received hash
+        const isValid = calculatedHash === hash;
+
+        let user;
+        const userParam = params.get('user');
+        if (userParam) {
+            try {
+                user = JSON.parse(decodeURIComponent(userParam)); // Ensure user data is decoded if necessary
+            } catch (e) {
+                console.warn("Failed to parse user data from initData:", e);
+                // Decide if this should invalidate the auth. Usually, yes.
+                return { isValid: false };
+            }
+        } else {
+            // If user data is critical, consider this invalid
+             console.warn("initData missing user parameter");
+             // return { isValid: false };
+        }
+
+
+        if (!isValid) {
+            console.warn("Telegram initData validation failed. Hash mismatch.");
+             // Log data for debugging (BE CAREFUL with sensitive data in production logs)
+             // console.debug("DataCheckString:", dataCheckString);
+             // console.debug("Received Hash:", hash);
+             // console.debug("Calculated Hash:", calculatedHash);
+        }
+
+        return { isValid, user };
+    } catch (error) {
+        console.error("Error during Telegram initData validation:", error);
+        return { isValid: false };
+    }
 }

@@ -8,9 +8,13 @@ import {
     FunctionDeclaration,
     SafetySetting,
     HarmCategory,
-    HarmBlockThreshold,
     GenerationConfig,
     Tool,
+    Part,
+    Content, // Import Content type
+    GenerateContentResponse,
+    GenerateContentParameters, // Import GenerateContentParameters type
+    HarmBlockThreshold
 } from '@google/genai/node';
 import { UserConfiguration } from '../context/types.js'; // Import user config type
 import crypto from 'crypto';
@@ -21,19 +25,32 @@ let ENCRYPTION_IV: Buffer | null = null;
 // Controls whether encryption/decryption is attempted. Defaults to true.
 const API_KEY_ENCRYPTION_ENABLED = process.env.API_KEY_ENCRYPTION_ENABLED !== 'false';
 
-if (process.env.ENCRYPTION_KEY) {
-    if (process.env.ENCRYPTION_KEY.length === 64 && /^[0-9a-fA-F]+$/.test(process.env.ENCRYPTION_KEY)) {
-        ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
+if (API_KEY_ENCRYPTION_ENABLED) {
+    if (process.env.ENCRYPTION_KEY) {
+        if (process.env.ENCRYPTION_KEY.length === 64 && /^[0-9a-fA-F]+$/.test(process.env.ENCRYPTION_KEY)) {
+            ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
+        } else {
+            console.error('ERROR: ENCRYPTION_KEY is set but not a 64-character hex string. API keys will not be securely decrypted.');
+        }
     } else {
-        console.error('ERROR: ENCRYPTION_KEY is set but not a 64-character hex string. API keys will not be securely decrypted.');
+         console.warn('WARN: API_KEY_ENCRYPTION_ENABLED is true, but ENCRYPTION_KEY is not set. API keys will be stored in plaintext.');
     }
-}
-if (process.env.ENCRYPTION_IV) {
-    if (process.env.ENCRYPTION_IV.length === 32 && /^[0-9a-fA-F]+$/.test(process.env.ENCRYPTION_IV)) {
-        ENCRYPTION_IV = Buffer.from(process.env.ENCRYPTION_IV, 'hex');
+    if (process.env.ENCRYPTION_IV) {
+        if (process.env.ENCRYPTION_IV.length === 32 && /^[0-9a-fA-F]+$/.test(process.env.ENCRYPTION_IV)) {
+            ENCRYPTION_IV = Buffer.from(process.env.ENCRYPTION_IV, 'hex');
+        } else {
+            console.error('ERROR: ENCRYPTION_IV is set but not a 32-character hex string. API keys will not be securely decrypted.');
+        }
     } else {
-        console.error('ERROR: ENCRYPTION_IV is set but not a 32-character hex string. API keys will not be securely decrypted.');
+        console.warn('WARN: API_KEY_ENCRYPTION_ENABLED is true, but ENCRYPTION_IV is not set. API keys will be stored in plaintext.');
     }
+     if (!ENCRYPTION_KEY || !ENCRYPTION_IV) {
+        console.warn('API Key encryption is enabled but keys are invalid/missing. Keys will be stored in plaintext.');
+    } else {
+        console.log('API Key encryption is enabled and keys are configured.');
+    }
+} else {
+    console.log('API Key encryption is disabled. Keys will be stored in plaintext.');
 }
 
 /**
@@ -47,9 +64,8 @@ if (process.env.ENCRYPTION_IV) {
 function decrypt(encryptedText: string): string {
     if (!encryptedText) return encryptedText;
 
-    // If encryption is disabled or keys are missing, return plaintext.
+    // If encryption is disabled or keys are missing/invalid, return plaintext.
     if (!API_KEY_ENCRYPTION_ENABLED || !ENCRYPTION_KEY || !ENCRYPTION_IV) {
-        if (!encryptedText) return encryptedText; // if text is null/undefined, return as is
         // Encryption is disabled or keys are missing, assume plaintext.
         // Warning about plaintext storage is in McpConfigStorage.
         return encryptedText;
@@ -59,6 +75,7 @@ function decrypt(encryptedText: string): string {
         // A simple check to see if it might be hex. If not, assume plaintext.
         // This is not foolproof but helps avoid errors if a plaintext key was stored.
         if (!/^[0-9a-fA-F]+$/.test(encryptedText) || encryptedText.length < 32) { // Encrypted keys are usually longer
+             console.warn("Stored API key doesn't look like hex, returning as plaintext.");
             return encryptedText; // Likely plaintext
         }
         const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, ENCRYPTION_IV);
@@ -81,18 +98,13 @@ function decrypt(encryptedText: string): string {
  */
 export class GeminiClient {
   private geminiShared?: GoogleGenAI; 
-  private userGeminiInstances: Map<number, GoogleGenAI> = new Map();
-
-  /**
-   * Initializes the GeminiClient.
-   * @param sharedApiKey - An optional shared Gemini API key to use as a default.
-   */
+  private userGeminiInstances: Map<number, GoogleGenAI> = new Map(); // Cache for user-specific instances
   constructor(sharedApiKey?: string) {
     if (sharedApiKey) {
       this.geminiShared = new GoogleGenAI({ apiKey: sharedApiKey });
       console.log('GeminiClient initialized with a shared API key.');
     } else {
-      console.warn(
+      console.log(
         'GeminiClient initialized without a shared API key. Per-user keys must be provided via UI.',
       );
     }
@@ -107,43 +119,50 @@ export class GeminiClient {
    * @returns The GoogleGenAI instance.
    * @throws {Error} If no API key can be determined or if decryption fails.
    */
-  private getGeminiInstance(userConfig?: UserConfiguration): GoogleGenAI {
-    if (userConfig?.geminiApiKey) {
-        let apiKey = userConfig.geminiApiKey;
-        try {
-          // Attempt decryption only if enabled and keys are available.
-          if (API_KEY_ENCRYPTION_ENABLED && ENCRYPTION_KEY && ENCRYPTION_IV) {
-            apiKey = decrypt(apiKey);
-          } // If disabled or keys missing, apiKey is used as is (assumed plaintext).
-        } catch (decryptionError: any) {
-            // Handle decryption failure specifically.
-            console.error(`Error decrypting API key for user ${userConfig.userId}: ${decryptionError.message}`);
-            // Option 1: Fallback to shared key if available
-            // if (this.geminiShared) {
-            //     console.warn(`Falling back to shared API key for user ${userConfig.userId} due to decryption error.`);
-            //     return this.geminiShared;
-            // }
-            // Option 2: Throw an error to prevent proceeding with a potentially compromised/unusable key.
-            throw new Error(`Could not use API key for user ${userConfig.userId} due to decryption failure. Please check configuration.`);
-        }
+  private getGeminiInstance(userConfig?: UserConfiguration | null): GoogleGenAI {
+    const userId = userConfig?.userId;
+    let apiKeyToUse: string | undefined = undefined;
 
-        if (!this.userGeminiInstances.has(userConfig.userId) || 
-            (this.userGeminiInstances.get(userConfig.userId) as any)?.options?.apiKey !== apiKey) { // Check if key changed
-            console.log(`Creating or updating Gemini instance for user ${userConfig.userId}`);
-            this.userGeminiInstances.set(
-                userConfig.userId,
-                new GoogleGenAI({ apiKey }),
-            );
+    if (userConfig?.geminiApiKey) {
+        try {
+            const decryptedKey = decrypt(userConfig.geminiApiKey);
+            apiKeyToUse = decryptedKey;
+            console.log(`Using decrypted API key for user ${userId}`);
+        } catch (decryptionError: any) {
+            console.error(`Error decrypting API key for user ${userId}: ${decryptionError.message}`);
+            if (this.geminiShared) {
+                console.warn(`Falling back to shared API key for user ${userId} due to decryption error.`);
+                return this.geminiShared;
+            }
+            throw new Error(`Could not use API key for user ${userId} due to decryption failure and no shared key available. Please check configuration.`);
         }
-        return this.userGeminiInstances.get(userConfig.userId)!;
     } else if (this.geminiShared) {
-      return this.geminiShared;
+        apiKeyToUse = (this.geminiShared as any)?.options?.apiKey; // Access internal options (may change)
+        console.log(`Using shared API key for user ${userId ?? 'unknown'}`);
+    }
+    if (!apiKeyToUse) {
+        throw new Error(
+            `No Gemini API key available for user ${userId ?? 'unknown'}. Please configure your key in settings or provide a SHARED_GEMINI_API_KEY.`
+        );
+    }
+
+    if (userConfig?.geminiApiKey && userId !== undefined && apiKeyToUse) { // Check if it was a user-specific key that was successfully processed
+        const cachedInstance = this.userGeminiInstances.get(userId);
+        if (!cachedInstance || (cachedInstance as any)?.options?.apiKey !== apiKeyToUse) {
+            console.log(`Creating or updating Gemini instance for user ${userId}`);
+            const newInstance = new GoogleGenAI({ apiKey: apiKeyToUse });
+            this.userGeminiInstances.set(userId, newInstance);
+            return newInstance;
+        }
+        return cachedInstance;
+    } else if (this.geminiShared) {
+        // If not a user-specific key, and a shared instance exists (apiKeyToUse would be from it)
+        return this.geminiShared;
     } else {
-      throw new Error(
-        `No Gemini API key available. Please configure your key in settings or provide a SHARED_GEMINI_API_KEY. User ID: ${userConfig?.userId}`,
-      );
+         throw new Error("Could not determine Gemini instance.");
     }
   }
+
 
   /**
    * Generates content using the Gemini API.
@@ -157,14 +176,13 @@ export class GeminiClient {
    * @throws {Error} If getting the Gemini instance fails or the API call fails.
    */
   async generateContent(
-    messages: any[], // History
+    messages: Content[], // Use imported Content type
     tools?: FunctionDeclaration[], 
-    multimodalParts?: any[], // Current turn multimodal parts
-    userConfig?: UserConfiguration // User-specific settings
+    userConfig?: UserConfiguration | null // Allow null
   ): Promise<{ functionCalls?: any[]; text?: string }> { 
     let geminiInstance: GoogleGenAI;
     try {
-      geminiInstance = this.getGeminiInstance(userConfig);
+      geminiInstance = this.getGeminiInstance(userConfig); // This now handles errors better
     } catch (e) {
       console.error('Error getting Gemini instance:', e);
       throw e; 
@@ -172,85 +190,65 @@ export class GeminiClient {
 
     // Determine the model name from user config or default.
     const modelName =
-      userConfig?.generalSettings?.geminiModel || 'gemini-1.5-flash-latest'; 
-
-    const model = geminiInstance.getGenerativeModel({ model: modelName });
+      userConfig?.generalSettings?.geminiModel || 'gemini-1.5-flash-latest'; // Use 1.5 as default?
 
     // Prepare the conversation history, potentially adding multimodal parts
     // to the last user message.
-    const contents = [...messages];
-    if (multimodalParts && multimodalParts.length > 0) {
-      let lastUserMessageIndex = -1;
-      for (let i = contents.length - 1; i >= 0; i--) {
-        if (contents[i].role === 'user') {
-          lastUserMessageIndex = i;
-          break;
-        }
-      }
-
-      if (lastUserMessageIndex !== -1) {
-        if (!contents[lastUserMessageIndex].parts) {
-          contents[lastUserMessageIndex].parts = [];
-        }
-        contents[lastUserMessageIndex].parts.push(...multimodalParts);
-      } else {
-        contents.push({ role: 'user', parts: multimodalParts });
-      }
-    }
+    const contents = [...messages]; // Shallow copy
 
     // Format tools for the Gemini API request.
-    const geminiTools: Tool[] = [];
-    if (tools && tools.length > 0) {
-      geminiTools.push({
-        functionDeclarations: tools,
-      });
-    }
-
-    // Prepare generation configuration (temperature, max tokens).
-    const generationConfig: GenerationConfig = {
-      temperature: userConfig?.generalSettings?.temperature ?? 0.7,
-    };
-    if (userConfig?.generalSettings?.maxOutputTokens) {
-        generationConfig.maxOutputTokens = userConfig.generalSettings.maxOutputTokens;
-    }
-    // Prepare safety settings if provided in user config.
 
     let safetySettings: SafetySetting[] | undefined = undefined;
     if (userConfig?.generalSettings?.safetySettings && Array.isArray(userConfig.generalSettings.safetySettings)) {
-        safetySettings = userConfig.generalSettings.safetySettings.map(setting => ({
-            category: setting.category as HarmCategory, // Cast, assuming valid strings from UI/DB
-            threshold: setting.threshold as HarmBlockThreshold, // Cast
-        }));
+        safetySettings = userConfig.generalSettings.safetySettings
+            .map(setting => ({
+                category: setting.category as HarmCategory, // Cast, assuming valid strings from UI/DB
+                threshold: setting.threshold as HarmBlockThreshold, // Cast
+            }))
+            .filter(setting => // Filter out potentially invalid enum values after casting
+                Object.values(HarmCategory).includes(setting.category) &&
+                Object.values(HarmBlockThreshold).includes(setting.threshold)
+            );
+         if (safetySettings.length === 0) safetySettings = undefined; // Set back to undefined if filtering removed all
     }
 
     // Prepare system instruction if provided.
     const systemInstruction = userConfig?.promptSystemSettings?.systemInstruction;
+    const systemInstructionContent: Content | undefined = systemInstruction
+        ? { role: 'system', parts: [{ text: systemInstruction }] }
+        : undefined;
+
+    const geminiTools: Tool[] | undefined = (tools && tools.length > 0)
+        ? [{ functionDeclarations: tools }]
+        : undefined;
 
     try {
-      console.log(`Generating content with model: ${modelName}, tools: ${geminiTools.length > 0}, system instruction: ${!!systemInstruction}, safety settings: ${safetySettings ? JSON.stringify(safetySettings) : 'default'}`);
+      console.log(`Generating content with model: ${modelName}, tools: ${!!geminiTools}, system instruction: ${!!systemInstruction}, safety settings: ${safetySettings ? JSON.stringify(safetySettings) : 'default'}`);
 
-      // Make the API call to Gemini.
-      const result = await model.generateContent({
+      const params: GenerateContentParameters = {
+        model: modelName, // Pass model name here
         contents: contents,
-        tools: geminiTools.length > 0 ? geminiTools : undefined,
-        generationConfig: generationConfig,
-        systemInstruction: systemInstruction
-          ? { role: 'system', parts: [{ text: systemInstruction }] } 
-          : undefined,
+        temperature: userConfig?.generalSettings?.temperature ?? 0.7,
+        maxOutputTokens: userConfig?.generalSettings?.maxOutputTokens,
+        systemInstruction: systemInstructionContent,
         safetySettings: safetySettings,
-      });
+        tools: geminiTools, // Correct placement for tools
+      };
 
-      // Parse the response to extract function calls and/or text.
-      const response = result.response;
-      const functionCalls = response.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
-      const textResponse = response.text(); 
+      const result: GenerateContentResponse = await geminiInstance.models.generateContent(params);
+      const textResponse = result.text ? result.text() : undefined;
+      const functionCallsFromResponse = result.functionCalls ? result.functionCalls() : undefined;
 
       return {
-        functionCalls: functionCalls,
+        functionCalls: functionCallsFromResponse && functionCallsFromResponse.length > 0 ? functionCallsFromResponse : undefined,
         text: textResponse,
       };
     } catch (error: any) {
       console.error('Error calling Gemini API:', error.message, error.stack);
+        // Attempt to log response details if available
+        if (error.response) {
+           console.error("Gemini API Error Response Details:", JSON.stringify(error.response, null, 2));
+        }
       throw new Error(`Gemini API error: ${error.message}`);
     }
   }
