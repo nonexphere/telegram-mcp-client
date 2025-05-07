@@ -13,8 +13,8 @@ datasource db {
 model UserConfig {
   userId               Int         @id // Telegram User ID
   geminiApiKey         String?
-  promptSystemSettings Json?     // Store as JSON
-  generalSettings      Json?     // Store as JSON
+  promptSystemSettings String?   // Store as JSON string
+  generalSettings      String?   // Store as JSON string
   mcpConfigs           McpConfig[]
 
   @@map("user_configs")
@@ -24,7 +24,7 @@ model McpConfig {
   id         Int        @id @default(autoincrement())
   userId     Int
   name       String     // For querying and unique identification per user
-  configJson Json       @map("config_json") // The rest of the MCP config
+  configJson String     @map("config_json") // The rest of the MCP config as JSON string
   user       UserConfig @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@unique([userId, name])
@@ -36,7 +36,7 @@ model ChatHistory {
   chatId        Int      @map("chat_id")
   messageIndex  Int      @map("message_index")
   role          String
-  contentJson   Json     @map("content_json") // Store as JSON
+  contentJson   String   @map("content_json") // Store as JSON string
   timestamp     DateTime @default(now())
 
   @@unique([chatId, messageIndex])

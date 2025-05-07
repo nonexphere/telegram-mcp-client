@@ -85,8 +85,7 @@ export class McpConfigStorage {
                 select: { name: true, configJson: true }
             });
             return dbConfigs.map(dbConfig => {
-                // configJson might not have 'name' if it's a separate column
-                const configData: MCPConfigWithOptionalName = dbConfig.configJson as MCPConfigWithOptionalName;
+                const configData: MCPConfigWithOptionalName = JSON.parse(dbConfig.configJson as string);
                 return { ...configData, name: dbConfig.name };
             });
         } catch (error) {
@@ -107,8 +106,8 @@ export class McpConfigStorage {
 
             await this.db.mcpConfig.upsert({
                 where: { userId_name: { userId, name } },
-                update: { configJson: configDataToStore as Prisma.InputJsonValue },
-                create: { userId, name, configJson: configDataToStore as Prisma.InputJsonValue },
+                update: { configJson: JSON.stringify(configDataToStore) },
+                create: { userId, name, configJson: JSON.stringify(configDataToStore) },
             });
             console.log(`Saved MCP config "${name}" for user ${userId} to DB.`);
         } catch (error) {
@@ -152,12 +151,11 @@ export class McpConfigStorage {
             });
             if (!row) return null;
 
-            // Decryption will happen in GeminiClient before use
             const config: UserConfiguration = {
                 userId: userId,
                 geminiApiKey: row.geminiApiKey ?? undefined,
-                promptSystemSettings: (row.promptSystemSettings as any) || {},
-                generalSettings: (row.generalSettings as any) || {},
+                promptSystemSettings: row.promptSystemSettings ? JSON.parse(row.promptSystemSettings as string) : {},
+                generalSettings: row.generalSettings ? JSON.parse(row.generalSettings as string) : {},
             };
             return config;
          } catch (error) {
@@ -175,15 +173,18 @@ export class McpConfigStorage {
     async saveUserConfiguration(config: UserConfiguration): Promise<void> {
         try {
             let apiKeyToSave = config.geminiApiKey;
-            // Encrypt the API key if it exists and encryption is enabled + configured.
             if (config.geminiApiKey && API_KEY_ENCRYPTION_ENABLED && ENCRYPTION_KEY && ENCRYPTION_IV) {
                 apiKeyToSave = encrypt(config.geminiApiKey);
             }
 
             const dataToSave = {
                 geminiApiKey: apiKeyToSave,
-                promptSystemSettings: (config.promptSystemSettings || {}) as Prisma.InputJsonValue,
-                generalSettings: (config.generalSettings || {}) as Prisma.InputJsonValue,
+                promptSystemSettings: (config.promptSystemSettings && Object.keys(config.promptSystemSettings).length > 0)
+                    ? JSON.stringify(config.promptSystemSettings)
+                    : null,
+                generalSettings: (config.generalSettings && Object.keys(config.generalSettings).length > 0)
+                    ? JSON.stringify(config.generalSettings)
+                    : null,
             };
 
             await this.db.userConfig.upsert({

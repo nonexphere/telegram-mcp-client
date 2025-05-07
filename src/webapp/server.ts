@@ -29,7 +29,7 @@ const UserSettingsPayloadSchema = z.object({
     geminiApiKey: z.string().optional().nullable(),
     promptSystemSettings: z.object({ systemInstruction: z.string().optional().nullable() }).passthrough().optional().nullable(),
     generalSettings: z.object({ geminiModel: z.string().optional().nullable(), temperature: z.number().min(0).max(1).optional().nullable(), safetySettings: z.array(SafetySettingSchema).optional().nullable(), googleSearchEnabled: z.boolean().optional().nullable() }).passthrough().optional().nullable(),
-}).passthrough(); // Allow other fields potentially
+}).passthrough();
 
 // --- Server Setup Function ---
 
@@ -144,6 +144,8 @@ export function setupWebAppServer(
                 generalSettings: {}
             };
 
+            // Construct the final configuration object.
+            // The McpConfigStorage.saveUserConfiguration method will handle stringifying the settings objects.
             const finalConfig: UserConfiguration = {
                 userId: userId,
                 geminiApiKey: updatedSettingsBody.geminiApiKey !== undefined ? updatedSettingsBody.geminiApiKey : existingConfig.geminiApiKey,
@@ -157,14 +159,13 @@ export function setupWebAppServer(
                 },
             };
 
-            // Ensure promptSystemSettings and generalSettings are valid JSON or null for Prisma
-            finalConfig.promptSystemSettings = (finalConfig.promptSystemSettings && Object.keys(finalConfig.promptSystemSettings).length > 0)
-                ? finalConfig.promptSystemSettings as Prisma.InputJsonValue
-                : Prisma.JsonNull;
-            finalConfig.generalSettings = (finalConfig.generalSettings && Object.keys(finalConfig.generalSettings).length > 0)
-                ? finalConfig.generalSettings as Prisma.InputJsonValue
-                : Prisma.JsonNull;
-            if (finalConfig.promptSystemSettings.systemInstruction === null || finalConfig.promptSystemSettings.systemInstruction === undefined) delete finalConfig.promptSystemSettings.systemInstruction;
+            // If systemInstruction is explicitly set to null or undefined in the payload,
+            // ensure it's removed from the object before saving, so it doesn't become "null" string inside JSON.
+            // Note: `saveUserConfiguration` will store `null` in DB if the whole settings object is empty.
+            if (finalConfig.promptSystemSettings && 
+                (finalConfig.promptSystemSettings.systemInstruction === null || finalConfig.promptSystemSettings.systemInstruction === undefined)) {
+                delete finalConfig.promptSystemSettings.systemInstruction;
+            }
 
             await mcpConfigStorage.saveUserConfiguration(finalConfig);
             res.json({ success: true, message: 'Settings saved successfully.' });

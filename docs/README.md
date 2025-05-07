@@ -56,17 +56,43 @@ A Telegram bot that acts as an MCP client, integrating with Gemini-2.5-Pro for n
     *   Update your bot's `YOUR_DEPLOYED_WEBAPP_URL_NOT_SET` placeholder in `src/bot/commands.ts` (or better, set an environment variable `YOUR_DEPLOYED_WEBAPP_URL` and read it there).
 
 6.  **Set up Prisma and Database:**
-    *   Initialize Prisma (if not already done by `npx prisma init` during setup - this command generates `prisma/schema.prisma`):
+    *   **Run Database Migrations:** This command will create the necessary tables in your database based on the `prisma/schema.prisma` file. It should be run after any changes to the schema.
         ```bash
-        npx prisma init --datasource-provider sqlite # Or your chosen provider (postgresql, mysql, mongodb, etc.)
+        pnpm db:migrate
         ```
-        (The provided patch will include a `prisma/schema.prisma` file, so this step might be more about adjusting the `datasource` block if you change DB).
-    *   Run database migrations to create tables:
+        *(Isso corresponde ao seu pedido de "migration")*
+    *   **Generate Prisma Client & Build Project:** The Prisma Client (o código que seu aplicativo usa para interagir com o banco de dados) e o build do projeto (compilação de TypeScript para JavaScript) são gerados com o seguinte comando:
         ```bash
-        npx prisma migrate dev --name init_migration
+        pnpm build
         ```
-    *   Generate Prisma Client: (This is often run by `prisma migrate dev` or can be run manually)
+        *(Isso corresponde aos seus pedidos de "gerar o prisma" e "gerar o build". O script `build` no `package.json` executa `prisma generate` e depois `tsc`.)*
+
+## Running the Bot
+
+After completing the setup steps:
+
+*   **For Development (with auto-reload):**
+    ```bash
+    pnpm dev
+    ```
+    This command uses `tsx` to run your TypeScript code directly and will automatically restart the bot when you make changes to the source files.
+
+*   **For Development (without auto-reload):**
+    ```bash
+    pnpm start
+    ```
+    This command also uses `tsx` to run your TypeScript code directly.
+
+*   **For Production:**
+    1.  Ensure you have built the project:
         ```bash
-        npx prisma generate
+        pnpm build
         ```
+    2.  Start the bot using the compiled JavaScript files:
+        ```bash
+        pnpm start:prod
+        ```
+        *(Este script `start:prod` executa `node dist/index.js`, que é o ponto de entrada do seu aplicativo compilado).*
+
+*(Os comandos acima correspondem ao seu pedido de "iniciar o projeto")*
 ```

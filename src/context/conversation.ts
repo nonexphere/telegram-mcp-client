@@ -28,11 +28,9 @@ export class ConversationManager {
                 select: { role: true, contentJson: true },
             });
             return rows.map((row) => {
-                // contentJson is already an object if Prisma's Json type is used correctly
-                // and the data in DB is valid JSON.
                 return {
                     role: row.role,
-                    parts: row.contentJson, // Prisma's JsonValue
+                    parts: JSON.parse(row.contentJson as string),
                 };
             });
         } catch (error) {
@@ -61,7 +59,7 @@ export class ConversationManager {
                     chatId,
                     messageIndex: nextIndex,
                     role: message.role,
-                    contentJson: message.parts as Prisma.InputJsonValue, // Prisma handles JSON serialization
+                    contentJson: JSON.stringify(message.parts),
                 },
             });
             console.log(`Added message to chat history for chat ${chatId}, index ${nextIndex}.`);
