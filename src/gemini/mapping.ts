@@ -1,6 +1,13 @@
-typescript
-import { FunctionDeclaration, Type } from '@google/genai/node';
-import { Tool } from '@modelcontextprotocol/sdk/client';
+import { FunctionDeclaration, Type } from '@google/genai/node'; // Changed from '@google/genai'
+
+// Assuming MCP Tool is correctly imported if needed, or its structure is known.
+// For this mapping, we only need the structure of MCP's Tool, which we assume is similar to:
+interface McpTool {
+    name: string;
+    description?: string;
+    inputSchema: any; // JSONSchema7 structure
+    // annotations?: any; // MCP specific, not directly mapped
+}
 import { JSONSchema7 } from 'json-schema'; // Assuming MCP uses JSON Schema Draft 7
 
 // Helper function to map JSONSchema7 types to Gemini FunctionDeclaration parameter types
@@ -32,7 +39,6 @@ function mapJsonSchemaTypeToGeminiType(schemaType: JSONSchema7['type']): Type {
 function mapJsonSchemaPropertiesToGeminiParameterProps(
   properties: { [key: string]: JSONSchema7 } | undefined
 ): { [key: string]: { type: Type; description?: string; enum?: string[] } } | undefined { // Simplified type for Gemini props
-
   if (!properties) return undefined;
 
   const geminiProperties: { [key: string]: { type: Type; description?: string; enum?: string[] } } = {};
@@ -41,12 +47,10 @@ function mapJsonSchemaPropertiesToGeminiParameterProps(
     if (Object.prototype.hasOwnProperty.call(properties, key)) {
       const propSchema = properties[key];
 
-      // Map to the simplified Gemini ParameterSpec.properties value structure
       geminiProperties[key] = {
-        type: mapJsonSchemaTypeToGeminiType(propSchema.type as JSONSchema7['type']), // Cast type
+        type: mapJsonSchemaTypeToGeminiType(propSchema.type as JSONSchema7['type']),
         description: propSchema.description,
         enum: Array.isArray(propSchema.enum) ? propSchema.enum.map(String) : undefined, // Enum values are strings in Gemini
-        // Note: Nested properties/items are not supported recursively in this simplified mapping.
       };
     }
   }
@@ -57,26 +61,20 @@ function mapJsonSchemaPropertiesToGeminiParameterProps(
 function mapJsonSchemaItemsToGeminiParameterItems(
   items: JSONSchema7 | JSONSchema7[] | undefined
 ): { type: Type; description?: string; enum?: string[] } | undefined { // Simplified type for Gemini items value
-
   if (!items) return undefined;
 
   // Assuming items is a single schema object as per common JSON Schema practice for arrays
   const itemSchema = items as JSONSchema7;
-
-  // Map to the simplified Gemini ParameterSpec.items value structure
-  const geminiItems: { type: Type; description?: string; enum?: string[] } = {
-    type: mapJsonSchemaTypeToGeminiType(itemSchema.type as JSONSchema7['type']), // Cast type
+  return {
+    type: mapJsonSchemaTypeToGeminiType(itemSchema.type as JSONSchema7['type']),
     description: itemSchema.description,
     enum: Array.isArray(itemSchema.enum) ? itemSchema.enum.map(String) : undefined,
-    // Note: Nested structures within items not supported recursively in this simplified mapping.
   };
-
-  return geminiItems;
 }
 
 
 // Maps an MCP Tool object to a Gemini FunctionDeclaration object
-export function mapMcpToolToGeminiFunctionDeclaration(tool: Tool, serverName: string): FunctionDeclaration {
+export function mapMcpToolToGeminiFunctionDeclaration(tool: McpTool, serverName: string): FunctionDeclaration {
   try {
     // Ensure inputSchema is treated as a JSONSchema7 object
     const inputSchema = tool.inputSchema as JSONSchema7;
@@ -93,7 +91,7 @@ export function mapMcpToolToGeminiFunctionDeclaration(tool: Tool, serverName: st
     // 'enum' is an array of strings for string/number/integer types.
 
     const geminiParameters: FunctionDeclaration['parameters'] = { // Use the specific type from GenAI SDK
-        type: mapJsonSchemaTypeToGeminiType(inputSchema.type as JSONSchema7['type']), // Map the top-level type of the inputSchema
+        type: mapJsonSchemaTypeToGeminiType(inputSchema.type as JSONSchema7['type']),
         description: inputSchema.description, // Description can be on inputSchema too
         required: inputSchema.required || [], // Required array at the top level of ParameterSpec
         enum: Array.isArray(inputSchema.enum) ? inputSchema.enum.map(String) : undefined, // Enum at top level
@@ -114,14 +112,15 @@ export function mapMcpToolToGeminiFunctionDeclaration(tool: Tool, serverName: st
     if (geminiParameters.required && geminiParameters.required.length === 0) {
         delete geminiParameters.required;
     }
+    if (geminiParameters.enum && geminiParameters.enum.length === 0) {
+        delete geminiParameters.enum;
+    }
 
 
     const geminiTool: FunctionDeclaration = {
       name: `${tool.name}_${serverName}`, // Map tool name to include server name for routing
       description: tool.description || 'No description provided.',
       parameters: geminiParameters, // Use the correctly mapped parameters
-       // Annotations are MCP specific, not directly mapped to Gemini FunctionDeclaration
-       // but could potentially be included in the description if helpful for the model.
     };
 
     return geminiTool;

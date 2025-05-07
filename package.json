@@ -1,5 +1,5 @@
 {
-  "name": "feathers-studio-mcp-gemini-bot",
+  "name": "telegram-mcp-client-bot",
   "version": "1.0.0",
   "description": "Telegram bot integrating MCP and Gemini-2.5-Pro with Mini App UI",
   "main": "dist/index.js",

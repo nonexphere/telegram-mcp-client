@@ -1,4 +1,3 @@
-typescript
 // This module manages user conversation history using the database.
 
 import Database from 'better-sqlite3';

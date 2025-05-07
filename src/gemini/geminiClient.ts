@@ -1,5 +1,10 @@
-typescript
-import { GoogleGenerativeAI, FunctionDeclaration, GenerationConfig, Tool, Type } from '@google/genai/node';
+import {
+    GoogleGenerativeAI, // Changed to GoogleGenerativeAI (matching SDK export)
+    FunctionDeclaration,
+    GenerationConfig,
+    Tool,
+    Type
+} from '@google/genai/node'; // Changed from '@google/genai'
 import { UserConfiguration } from '../context/types.js'; // Import user config type
 
 export class GeminiClient {
@@ -7,7 +12,7 @@ export class GeminiClient {
   private sharedApiKey?: string; // Optional shared key
 
   // Store Gemini instances per user if using per-user keys
-  private userGeminiInstances: Map<number, GoogleGenerativeAI> = new Map(); // Map<userId, GoogleGenerativeAI>
+  private userGeminiInstances: Map<number, GoogleGenerativeAI> = new Map();
 
   constructor(sharedApiKey?: string) {
     this.sharedApiKey = sharedApiKey;
@@ -16,10 +21,16 @@ export class GeminiClient {
     }
     // Create a default instance if a shared key is provided
     if (sharedApiKey) {
-        this.gemini = new GoogleGenerativeAI(sharedApiKey);
+        // Use the GoogleGenerativeAI constructor from @google/genai/node
+        this.gemini = new GoogleGenerativeAI({ apiKey: sharedApiKey });
     } else {
          // Placeholder instance, actual instance will be created per user
-         this.gemini = null as any; // Will throw if used directly
+         // For now, let's create a dummy instance if no shared key.
+         // Note: Instantiating might still require basic options even if key is null.
+         // Placeholder: getGeminiInstance must handle the case where no sharedApiKey is available.
+         // For now, the constructor requires an API key.
+         // We will rely on getGeminiInstance to throw if no key is found.
+         this.gemini = null as any; // To satisfy TypeScript, actual instance created on demand
     }
   }
 
@@ -27,13 +38,19 @@ export class GeminiClient {
   private getGeminiInstance(userConfig: UserConfiguration): GoogleGenerativeAI {
       if (userConfig.geminiApiKey) {
            if (!this.userGeminiInstances.has(userConfig.userId)) {
-               this.userGeminiInstances.set(userConfig.userId, new GoogleGenerativeAI(userConfig.geminiApiKey));
+               // Use the GoogleGenerativeAI constructor for per-user instance
+               this.userGeminiInstances.set(userConfig.userId, new GoogleGenerativeAI({ apiKey: userConfig.geminiApiKey }));
            }
            return this.userGeminiInstances.get(userConfig.userId)!;
       } else if (this.sharedApiKey) {
+           // If shared key exists, and main this.gemini wasn't initialized (because sharedApiKey was null in constructor), initialize it now.
+           if (!this.gemini) {
+               this.gemini = new GoogleGenerativeAI({ apiKey: this.sharedApiKey });
+           }
            return this.gemini; // Use the shared instance
       } else {
-           throw new Error(`No Gemini API key available for user ${userConfig.userId}. Please configure your key.`);
+           // This error should be caught by the caller (message/media handlers)
+           throw new Error(`No Gemini API key available for user ${userConfig.userId}. Please configure your key in the settings.`);
       }
   }
 
@@ -47,16 +64,27 @@ export class GeminiClient {
 
     // Get the appropriate Gemini instance for the user
     let geminiInstance: GoogleGenerativeAI;
-    if (userConfig) {
-        geminiInstance = this.getGeminiInstance(userConfig);
-    } else if (this.sharedApiKey) {
-        geminiInstance = this.gemini;
+    if (!userConfig) { // Ensure userConfig is defined before accessing its properties
+        if (this.sharedApiKey) {
+            if (!this.gemini) this.gemini = new GoogleGenerativeAI({ apiKey: this.sharedApiKey });
+            geminiInstance = this.gemini;
+        } else {
+            throw new Error("Cannot get Gemini instance: No user config or shared API key provided.");
+        }
     } else {
-        throw new Error("Cannot get Gemini instance: No user config or shared API key provided.");
+        try {
+            geminiInstance = this.getGeminiInstance(userConfig);
+        } catch (e) {
+           throw e;
+        }
     }
 
+    // Access the model from the geminiInstance
+    const modelName = (userConfig && userConfig.generalSettings && userConfig.generalSettings.geminiModel)
+        ? userConfig.generalSettings.geminiModel
+        : 'gemini-2.5-flash-latest'; // Fallback model
 
-    const model = geminiInstance.getGenerativeModel({ model: userConfig?.generalSettings?.geminiModel || 'gemini-2.5-flash-latest' }); // Use user's preferred model
+    const model = geminiInstance.getGenerativeModel({ model: modelName });
 
     // Combine message history and potential multimodal parts for the current turn
     const contents = [...messages];
@@ -72,6 +100,10 @@ export class GeminiClient {
 
          if (lastUserMessageIndex !== -1) {
              // Append multimodal parts to the last user message parts
+              // Ensure the 'parts' array exists
+              if (!contents[lastUserMessageIndex].parts) {
+                   contents[lastUserMessageIndex].parts = [];
+              }
               contents[lastUserMessageIndex].parts.push(...multimodalParts);
          } else {
               // If no user message found (shouldn't happen in normal chat flow),
@@ -91,17 +123,19 @@ export class GeminiClient {
 
      // Basic generation configuration (override with user settings)
      const generationConfig: GenerationConfig = {
-        temperature: userConfig?.generalSettings?.temperature ?? 0.7, // Use user setting or default
-        // maxOutputTokens: userConfig?.generalSettings?.maxOutputTokens ?? 1024, // Use user setting or default
-        // Add other user-configurable settings here
+        temperature: (userConfig && userConfig.generalSettings && typeof userConfig.generalSettings.temperature === 'number')
+            ? userConfig.generalSettings.temperature
+            : 0.7,
      };
 
      // Apply user's prompt system if available
-     const systemInstruction = userConfig?.promptSystemSettings?.systemInstruction;
+     const systemInstruction = (userConfig && userConfig.promptSystemSettings)
+        ? userConfig.promptSystemSettings.systemInstruction
+        : undefined;
 
 
-    console.log('Sending content to Gemini:', contents);
-    console.log('With tools:', geminiTools);
+    console.log('Sending content to Gemini:', JSON.stringify(contents, null, 2));
+    console.log('With tools:', JSON.stringify(geminiTools, null, 2));
      if (systemInstruction) console.log('With system instruction:', systemInstruction);
 
 
@@ -116,10 +150,10 @@ export class GeminiClient {
       const response = result.response;
 
       // Extract function calls
-      const functionCalls = response.functionCalls;
-
+      // Check if response.candidates and response.candidates[0] exist before accessing functionCalls
+      const functionCalls = response.candidates?.[0]?.functionCalls;
       // Extract text response
-      const textResponse = response.text();
+      const textResponse = response.text; // Use the getter property
 
       console.log('Received response from Gemini.');
       if (functionCalls) {
@@ -133,8 +167,7 @@ export class GeminiClient {
       // Return a structured result
       return {
         functionCalls: functionCalls,
-        text: textResponse,
-        // Include other relevant response info if needed
+        text: textResponse
       };
 
     } catch (error: any) {

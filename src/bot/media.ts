@@ -1,4 +1,3 @@
-typescript
 import { Telegraf, Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { McpClientManager } from '../mcp/mcpClientManager.js';

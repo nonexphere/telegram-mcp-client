@@ -1,4 +1,3 @@
-typescript
 import express, { Application, Request, Response } from 'express';
 import { join } from 'path';
 import { fileURLToPath } from 'url';

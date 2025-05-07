@@ -1,5 +1,5 @@
 markdown
-# Feathers Studio MCP Gemini Bot
+# Telegram MCP Client Bot
 
 A Telegram bot that acts as an MCP client, integrating with Gemini-2.5-Pro for natural language processing, tool orchestration, and multimodal input handling. Configuration is managed via a Telegram Mini App UI.
 
@@ -17,7 +17,7 @@ A Telegram bot that acts as an MCP client, integrating with Gemini-2.5-Pro for n
 1.  **Clone the repository:**
     ```bash
     git clone <repository_url>
-    cd feathers-studio-mcp-gemini-bot
+    cd telegram-mcp-client-bot 
     ```
 
 2.  **Install dependencies:**

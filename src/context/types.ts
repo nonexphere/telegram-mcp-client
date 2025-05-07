@@ -1,4 +1,3 @@
-typescript
 // Define types for user-specific configurations
 
 export interface PromptSystemSettings {

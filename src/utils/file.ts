@@ -1,4 +1,3 @@
-typescript
 import fetch from 'node-fetch';
 
 // Helper function to download a file from a URL and return buffer data and mime type

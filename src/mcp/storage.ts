@@ -1,4 +1,3 @@
-typescript
 import Database from 'better-sqlite3';
 import { MCPConfig } from './types.js';
 import { UserConfiguration } from '../context/types.js'; // Import UserConfig type

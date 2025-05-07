@@ -1,4 +1,3 @@
-typescript
 import { Telegraf, Context } from 'telegraf';
 import dotenv from 'dotenv';
 import { McpClientManager } from './mcp/mcpClientManager.js';

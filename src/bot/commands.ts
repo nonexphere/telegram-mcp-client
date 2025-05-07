@@ -1,4 +1,3 @@
-typescript
 import { Telegraf, Context, Markup } from 'telegraf';
 import { McpClientManager } from '../mcp/mcpClientManager.js';
 import { GeminiClient } from '../gemini/geminiClient.js';
