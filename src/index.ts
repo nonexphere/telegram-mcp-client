@@ -5,7 +5,7 @@ import { GeminiClient } from './gemini/geminiClient.js';
 import { ConversationManager } from './context/conversation.js';
 import { setupCommands } from './bot/commands.js';
 import { setupMessageHandlers } from './bot/messages.js';
-import { setupMediaHandlers } from './bot/media.js';
+import { setupMediaHandlers, processMediaWithToolExecution } from './bot/media.js';
 import { initDb, closeDb, getDb } from './db.js'; 
 import { getMcpConfigStorage } from './mcp/storage.js';
 import { setupWebAppServer } from './webapp/server.js';
@@ -42,7 +42,7 @@ async function main() {
 
     setupCommands(bot, mcpClientManager, geminiClient, conversationManager);
     setupMessageHandlers(bot, mcpClientManager, geminiClient, conversationManager, mcpConfigStorage);
-    setupMediaHandlers(bot, mcpClientManager, geminiClient, conversationManager, mcpConfigStorage);
+    setupMediaHandlers(bot, mcpClientManager, geminiClient, conversationManager, mcpConfigStorage, processMediaWithToolExecution);
 
     const app = express();
     app.use(bodyParser.json());

@@ -2,8 +2,8 @@ import express, { Application, Request, Response, NextFunction } from 'express';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import crypto from 'crypto'; 
-import type { Database } from 'sqlite';
+import crypto from 'crypto';
+import type { PrismaClient, Prisma } from '@prisma/client';
 import { McpClientManager } from '../mcp/mcpClientManager.js';
 import { GeminiClient } from '../gemini/geminiClient.js';
 import { ConversationManager } from '../context/conversation.js';
@@ -17,7 +17,7 @@ const __dirname = dirname(__filename);
 
 export function setupWebAppServer(
     app: Application,
-    db: Database, 
+    db: PrismaClient, 
     mcpClientManager: McpClientManager,
     geminiClient: GeminiClient,
     conversationManager: ConversationManager,
@@ -99,7 +99,13 @@ export function setupWebAppServer(
                 },
             };
 
-            if (finalConfig.geminiApiKey === null || finalConfig.geminiApiKey === undefined) delete finalConfig.geminiApiKey;
+            // Ensure promptSystemSettings and generalSettings are valid JSON or null for Prisma
+            finalConfig.promptSystemSettings = (finalConfig.promptSystemSettings && Object.keys(finalConfig.promptSystemSettings).length > 0)
+                ? finalConfig.promptSystemSettings as Prisma.InputJsonValue
+                : Prisma.JsonNull;
+            finalConfig.generalSettings = (finalConfig.generalSettings && Object.keys(finalConfig.generalSettings).length > 0)
+                ? finalConfig.generalSettings as Prisma.InputJsonValue
+                : Prisma.JsonNull;
             if (finalConfig.promptSystemSettings.systemInstruction === null || finalConfig.promptSystemSettings.systemInstruction === undefined) delete finalConfig.promptSystemSettings.systemInstruction;
 
             await mcpConfigStorage.saveUserConfiguration(finalConfig);

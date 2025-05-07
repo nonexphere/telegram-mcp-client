@@ -47,6 +47,20 @@ Here are some common issues and troubleshooting steps for the bot.
     *   Ensure the mapping from MCP tool `inputSchema` to Gemini `functionDeclarations` is correct. Errors here might cause Gemini to send arguments the tool doesn't expect.
     *   **Important:** The client connection for a user is attempted *on demand*. If the server fails to start or connect, the tool call will fail.
 
+*   **Prisma / Database Issues:**
+    *   **Connection Errors:**
+        *   Verify the `DATABASE_URL` in your `.env` file is correct for your database type and credentials.
+        *   For SQLite, ensure the path to the database file is correct and the directory is writable by the bot process.
+    *   **Migration Issues:**
+        *   If you see errors like "The table `tableName` does not exist in the current database," you might have forgotten to run migrations. Execute `npx prisma migrate dev --name <migration_name>`.
+        *   If a migration fails, check the error message. You might need to resolve conflicts or reset your database (for development only: `npx prisma migrate reset`).
+    *   **Prisma Client Not Generated / Out of Sync:**
+        *   If you get TypeScript errors related to Prisma Client types or runtime errors about missing methods, run `npx prisma generate`. This is usually done automatically by `prisma migrate dev`, but can be run manually.
+    *   **`PrismaClientKnownRequestError` / `PrismaClientValidationError` etc.:**
+        *   These are specific errors from Prisma. The error message usually provides good clues.
+        *   `P2002`: Unique constraint failed (e.g., trying to insert a duplicate `userId` in `UserConfig` or a duplicate `userId`+`name` in `McpConfig`).
+        *   `P2025`: Record to update or delete does not exist.
+
 *   **MCP notifications (`tools/list_changed`, etc.) are not handled:**
     *   Ensure the `setupClientListeners` method in `src/mcp/mcpClientManager.ts` is correctly implemented and the event listeners are attached when a client connects.
     *   Verify the MCP server supports sending these specific notifications (check the server's documentation or capabilities during initialization).

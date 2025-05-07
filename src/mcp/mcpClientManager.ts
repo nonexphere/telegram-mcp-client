@@ -1,8 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { Database } from 'sqlite'; 
-import { MCPConfig } from './types.js';
+import type { PrismaClient } from '@prisma/client';
+import { MCPConfig, MCPConfigWithOptionalName } from './types.js';
 import { FunctionDeclaration } from '@google/genai'; 
 import { mapMcpToolToGeminiFunctionDeclaration } from '../gemini/mapping.js';
 
@@ -10,9 +10,9 @@ type UserClientsMap = Map<string, { config: MCPConfig; client: Client | null }>;
 
 export class McpClientManager {
   private activeServers: Map<number, UserClientsMap> = new Map();
-  private db: Database; 
+  private db: PrismaClient; 
 
-  constructor(db: Database) {
+  constructor(db: PrismaClient) {
     this.db = db;
     this.loadUserConfigsFromDb().catch(err => {
         console.error("Failed to load MCP user configs on startup:", err);
@@ -21,10 +21,14 @@ export class McpClientManager {
 
   private async loadUserConfigsFromDb(): Promise<void> {
     try {
-      const configs = await this.db.all('SELECT user_id, config_json FROM mcp_configs');
-      for (const row of configs) {
-        const userId = row.user_id;
-        const config: MCPConfig = JSON.parse(row.config_json);
+      const configsFromDb = await this.db.mcpConfig.findMany({
+        select: { userId: true, name: true, configJson: true }
+      });
+      for (const row of configsFromDb) { // Changed variable name here
+        const userId = row.userId; // Corrected: use row.userId
+        const name = row.name; 
+        const configData: MCPConfigWithOptionalName = row.configJson as MCPConfigWithOptionalName;
+        const config: MCPConfig = { ...configData, name };
 
         if (!this.activeServers.has(userId)) {
           this.activeServers.set(userId, new Map());
@@ -54,8 +58,16 @@ export class McpClientManager {
 
     userClients.set(config.name, { config, client: null });
 
+    // Prepare data for Prisma: separate 'name' and store the rest in 'configJson'
+    const { name, ...configDataToStore } = config;
     try {
-      await this.db.run('INSERT INTO mcp_configs (user_id, config_json) VALUES (?, ?)', userId, JSON.stringify(config));
+      await this.db.mcpConfig.create({
+        data: {
+          userId,
+          name, // Save the name separately
+          configJson: configDataToStore, // Store the rest of the config as JSON
+        },
+      });
       console.log(`MCP server config "${config.name}" added for user ${userId} in DB.`);
     } catch (error) {
       console.error(`Error saving MCP config "${config.name}" for user ${userId} to DB:`, error);
@@ -88,7 +100,13 @@ export class McpClientManager {
 
     if (triggerDbRemove) {
       try {
-        await this.db.run('DELETE FROM mcp_configs WHERE user_id = ? AND json_extract(config_json, \'$.name\') = ?', userId, serverName);
+        // Delete by unique constraint userId_name
+        await this.db.mcpConfig.deleteMany({
+            where: {
+                userId: userId,
+                name: serverName,
+            },
+        });
         console.log(`MCP server config "${serverName}" removed from DB for user ${userId}.`);
       } catch (error) {
         console.error(`Error removing MCP config "${serverName}" for user ${userId} from DB:`, error);
@@ -111,9 +129,14 @@ export class McpClientManager {
 
     if (!serverEntry) {
       try {
-        const row = await this.db.get('SELECT config_json FROM mcp_configs WHERE user_id = ? AND json_extract(config_json, \'$.name\') = ?', userId, serverName);
-        if (row) {
-            const config: MCPConfig = JSON.parse(row.config_json);
+        const dbEntry = await this.db.mcpConfig.findUnique({
+            where: { userId_name: { userId, name: serverName } }, // Using composite key
+            select: { name: true, configJson: true },
+        });
+        if (dbEntry) {
+            const configData: MCPConfigWithOptionalName = dbEntry.configJson as MCPConfigWithOptionalName;
+            const config: MCPConfig = { ...configData, name: dbEntry.name };
+
             if (!this.activeServers.has(userId)) {
                 this.activeServers.set(userId, new Map());
             }

@@ -1,0 +1,44 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite" // Or "postgresql", "mysql", "sqlserver", "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model UserConfig {
+  userId               Int         @id // Telegram User ID
+  geminiApiKey         String?
+  promptSystemSettings Json?     // Store as JSON
+  generalSettings      Json?     // Store as JSON
+  mcpConfigs           McpConfig[]
+
+  @@map("user_configs")
+}
+
+model McpConfig {
+  id         Int        @id @default(autoincrement())
+  userId     Int
+  name       String     // For querying and unique identification per user
+  configJson Json       @map("config_json") // The rest of the MCP config
+  user       UserConfig @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@unique([userId, name])
+  @@map("mcp_configs")
+}
+
+model ChatHistory {
+  id            Int      @id @default(autoincrement())
+  chatId        Int      @map("chat_id")
+  messageIndex  Int      @map("message_index")
+  role          String
+  contentJson   Json     @map("content_json") // Store as JSON
+  timestamp     DateTime @default(now())
+
+  @@unique([chatId, messageIndex])
+  @@map("chat_history")
+}

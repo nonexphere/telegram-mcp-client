@@ -7,16 +7,73 @@ import { downloadFile } from '../utils/file.js';
 import { McpConfigStorage } from '../mcp/storage.js';
 import { UserConfiguration } from '../context/types.js';
 
-export function setupMediaHandlers(
-  bot: Telegraf<Context>,
-  mcpClientManager: McpClientManager,
-  geminiClient: GeminiClient,
-  conversationManager: ConversationManager,
-  mcpConfigStorage: McpConfigStorage // Added McpConfigStorage
-): void {
+export async function processMediaWithToolExecution(
+    ctx: Context,
+    geminiResponse: { functionCalls?: any[]; text?: string },
+    chatId: number,
+    userId: number, // Added userId
+    mcpClientManager: McpClientManager,
+    geminiClient: GeminiClient,
+    conversationManager: ConversationManager,
+    userSettings?: UserConfiguration | null // Added userSettings
+) {
+    if (geminiResponse.functionCalls && geminiResponse.functionCalls.length > 0) {
+        console.log(`[Chat ${chatId}] Gemini wants to call functions based on media:`, geminiResponse.functionCalls);
 
-  // Helper to process media common steps
-  const processMedia = async (ctx: Context, fileId: string, mimeType: string, caption?: string) => {
+        const toolResults: any[] = [];
+        for (const functionCall of geminiResponse.functionCalls) {
+            try {
+                const mcpToolResult = await mcpClientManager.callTool(userId, functionCall); // Pass userId
+                const geminiFunctionResponse = { name: functionCall.name, response: {} as any };
+                if (mcpToolResult && !mcpToolResult.isError) {
+                    geminiFunctionResponse.response.result = mcpToolResult.content;
+                } else {
+                    geminiFunctionResponse.response.error = (mcpToolResult?.content?.[0]?.text || 'Unknown tool error').toString();
+                }
+                toolResults.push(geminiFunctionResponse);
+                console.log(`[Chat ${chatId}] MCP tool "${functionCall.name}" executed. Result:`, mcpToolResult);
+            } catch (toolError: any) {
+                console.error(`[Chat ${chatId}] Error executing MCP tool "${functionCall.name}":`, toolError);
+                toolResults.push({ name: functionCall.name, response: { error: toolError.message || 'Unknown tool error' } });
+                ctx.reply(`Error executing tool: ${functionCall.name}. ${toolError.message || 'See logs.'}`);
+            }
+        }
+
+        await conversationManager.addMessage(chatId, { role: 'model', parts: geminiResponse.functionCalls.map((fc: any) => ({ functionCall: fc })) });
+        await conversationManager.addMessage(chatId, { role: 'user', parts: toolResults.map(tr => ({ functionResponse: tr })) });
+
+        const historyWithToolResults = await conversationManager.getHistory(chatId);
+        const geminiTools = await mcpClientManager.getTools(userId);
+        const finalGeminiResponse = await geminiClient.generateContent(historyWithToolResults, geminiTools, undefined, userSettings || undefined);
+
+        const finalText = finalGeminiResponse.text;
+        if (finalText) {
+            console.log(`[Chat ${chatId}] Gemini final text response after media tool execution:`, finalText);
+            ctx.reply(finalText);
+            await conversationManager.addMessage(chatId, { role: 'model', parts: [{ text: finalText }] });
+        } else {
+            console.warn(`[Chat ${chatId}] Gemini did not return final text after media tool execution.`);
+            ctx.reply('Action completed, but I did not get a final text response.');
+        }
+    } else if (geminiResponse.text) {
+        console.log(`[Chat ${chatId}] Gemini direct text response for media:`, geminiResponse.text);
+        ctx.reply(geminiResponse.text);
+        await conversationManager.addMessage(chatId, { role: 'model', parts: [{ text: geminiResponse.text }] });
+    } else {
+        console.warn(`[Chat ${chatId}] Gemini returned an empty response for media.`);
+        ctx.reply('Could not generate a response for the media.');
+    }
+}
+
+export function setupMediaHandlers(
+    bot: Telegraf<Context>,
+    mcpClientManager: McpClientManager,
+    geminiClient: GeminiClient,
+    conversationManager: ConversationManager,
+    mcpConfigStorage: McpConfigStorage,
+    _processMediaWithToolExecution: typeof processMediaWithToolExecution // Pass the function for testability or direct call
+): void {
+    const processMedia = async (ctx: Context, fileId: string, mimeType: string, caption?: string) => {
     if (!ctx.chat || !ctx.from) {
       console.warn('Received media without chat or from context:', ctx);
       return;
@@ -83,46 +140,8 @@ export function setupMediaHandlers(
       // Pass user settings to GeminiClient if needed
       const geminiResponse = await geminiClient.generateContent(history, geminiTools, multimodalParts, userSettings || undefined);
 
-       // Process Gemini's response (similar to text message handler)
-      if (geminiResponse.functionCalls && geminiResponse.functionCalls.length > 0) {
-        console.log('Gemini wants to call functions:', geminiResponse.functionCalls);
-        // TODO: Implement full tool execution logic as in messages.ts
-        // This logic needs to:
-        // 1. Loop through geminiResponse.functionCalls
-        // 2. For each functionCall:
-        //    a. Call mcpClientManager.callTool(chatId, functionCall)
-        //    b. Map the mcpToolResult to the Gemini functionResponse format:
-        //       const geminiFunctionResponse: { name: string; response: { result?: any; error?: string } } = {
-        //           name: functionCall.name,
-        //           response: {}
-        //       };
-        //       if (mcpToolResult && !mcpToolResult.isError) {
-        //           geminiFunctionResponse.response.result = mcpToolResult.content;
-        //       } else {
-        //           const errorMessage = (mcpToolResult?.content?.[0]?.text || 'Unknown tool error').toString();
-        //           geminiFunctionResponse.response.error = errorMessage;
-        //       }
-        //    c. Add geminiFunctionResponse to a toolResults array.
-        // 3. Add Gemini's function call response and the tool results to history (conversationManager.addMessage)
-        // 4. Call geminiClient.generateContent again with the updated history and userSettings.
-        // 5. Send the final text response from Gemini to the user.
-
-        ctx.reply('Gemini wants to call tools based on the media, but tool execution for media inputs needs full implementation.');
-        // For a complete implementation, you'd duplicate or refactor the tool execution logic from messages.ts here.
-
-      } else {
-        // Gemini returned a direct text response
-        const textResponse = geminiResponse.text;
-        if (textResponse) {
-          console.log('Gemini direct text response:', textResponse);
-          ctx.reply(textResponse);
-           // Add Gemini's response to history
-           await conversationManager.addMessage(chatId, { role: 'model', parts: [{ text: textResponse }] });
-        } else {
-          console.warn('Gemini returned an empty response for media from chat', chatId);
-          ctx.reply('Could not generate a response for the media.');
-        }
-      }
+       // Use the refactored tool execution logic
+       await _processMediaWithToolExecution(ctx, geminiResponse, chatId, userId, mcpClientManager, geminiClient, conversationManager, userSettings);
 
     } catch (error: any) {
       console.error('Error processing media for chat', chatId, ':', error);

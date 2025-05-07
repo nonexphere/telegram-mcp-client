@@ -46,8 +46,13 @@ Chat history contains user inputs and bot outputs, potentially including sensiti
 
 *   **Storage:** Encrypt sensitive parts of the chat history in the database if necessary.
 *   **Access:** Ensure users can only access their own chat history. The database queries in `ConversationManager` must be scoped by `chat_id` or `user_id`.
+    *   Ensure users can only access their own chat history. The database queries in `ConversationManager` must be scoped by `chat_id` or `user_id`.
 
 ## 5. Third-Party Dependencies
+*   **Database Connection String (`DATABASE_URL`)**:
+    *   The `DATABASE_URL` in your `.env` file contains credentials and connection details for your database. This file should **never** be committed to version control.
+    *   Ensure the `.env` file has restrictive permissions on your server.
+    *   For production databases, use strong, unique passwords and consider network-level access controls (firewalls) to restrict who can connect to your database server.
 
 *   Ensure all your npm dependencies (including transitive ones) are up-to-date and do not have known vulnerabilities. Use `npm audit` regularly.
 *   Be cautious of using untrusted MCP servers or libraries. Their code runs (stdio) or is interacted with (http) by your bot.
