@@ -79,6 +79,12 @@ button:disabled {
     background-color: #ccc;
     cursor: not-allowed;
 }
+.warning {
+    color: var(--tg-theme-hint-color, #999); /* Ou uma cor de aviso */
+    font-size: 0.9em;
+    margin-top: 5px;
+    margin-bottom: 10px;
+}
 
 .hidden {
     display: none;

@@ -1,3 +1,7 @@
+/**
+ * @file Sets up message handlers for media types (photos, audio, documents)
+ * and contains logic for processing media with Gemini and MCP tools.
+ */
 import { Telegraf, Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { McpClientManager } from '../mcp/mcpClientManager.js';
@@ -7,6 +11,18 @@ import { downloadFile } from '../utils/file.js';
 import { McpConfigStorage } from '../mcp/storage.js';
 import { UserConfiguration } from '../context/types.js';
 
+/**
+ * Processes the response from Gemini after a media message, handling potential tool calls.
+ * This function is separated for clarity and potential reuse/testing.
+ * @param ctx - The Telegraf context object.
+ * @param geminiResponse - The response object from Gemini (may contain text or functionCalls).
+ * @param chatId - The ID of the chat.
+ * @param userId - The ID of the user who sent the media.
+ * @param mcpClientManager - Instance for managing MCP clients.
+ * @param geminiClient - Instance for interacting with Gemini.
+ * @param conversationManager - Instance for managing chat history.
+ * @param userSettings - Optional user-specific configuration.
+ */
 export async function processMediaWithToolExecution(
     ctx: Context,
     geminiResponse: { functionCalls?: any[]; text?: string },
@@ -17,10 +33,12 @@ export async function processMediaWithToolExecution(
     conversationManager: ConversationManager,
     userSettings?: UserConfiguration | null // Added userSettings
 ) {
+    // Check if Gemini requested function calls based on the media.
     if (geminiResponse.functionCalls && geminiResponse.functionCalls.length > 0) {
         console.log(`[Chat ${chatId}] Gemini wants to call functions based on media:`, geminiResponse.functionCalls);
 
         const toolResults: any[] = [];
+        // Execute each requested function call via the McpClientManager.
         for (const functionCall of geminiResponse.functionCalls) {
             try {
                 const mcpToolResult = await mcpClientManager.callTool(userId, functionCall); // Pass userId
@@ -39,10 +57,12 @@ export async function processMediaWithToolExecution(
             }
         }
 
+        // Add Gemini's request and the tool results to the conversation history.
         await conversationManager.addMessage(chatId, { role: 'model', parts: geminiResponse.functionCalls.map((fc: any) => ({ functionCall: fc })) });
         await conversationManager.addMessage(chatId, { role: 'user', parts: toolResults.map(tr => ({ functionResponse: tr })) });
 
         const historyWithToolResults = await conversationManager.getHistory(chatId);
+        // Call Gemini again with the updated history to get the final response.
         const geminiTools = await mcpClientManager.getTools(userId);
         const finalGeminiResponse = await geminiClient.generateContent(historyWithToolResults, geminiTools, undefined, userSettings || undefined);
 
@@ -56,6 +76,7 @@ export async function processMediaWithToolExecution(
             ctx.reply('Action completed, but I did not get a final text response.');
         }
     } else if (geminiResponse.text) {
+        // Gemini provided a direct text response for the media.
         console.log(`[Chat ${chatId}] Gemini direct text response for media:`, geminiResponse.text);
         ctx.reply(geminiResponse.text);
         await conversationManager.addMessage(chatId, { role: 'model', parts: [{ text: geminiResponse.text }] });
@@ -65,6 +86,16 @@ export async function processMediaWithToolExecution(
     }
 }
 
+/**
+ * Registers message handlers for various media types (photo, audio, document).
+ * @param bot - The Telegraf bot instance.
+ * @param mcpClientManager - Instance for managing MCP clients.
+ * @param geminiClient - Instance for interacting with Gemini.
+ * @param conversationManager - Instance for managing chat history.
+ * @param mcpConfigStorage - Instance for accessing user configurations.
+ * @param _processMediaWithToolExecution - The function to handle Gemini responses and tool calls for media.
+ */
+
 export function setupMediaHandlers(
     bot: Telegraf<Context>,
     mcpClientManager: McpClientManager,
@@ -73,6 +104,15 @@ export function setupMediaHandlers(
     mcpConfigStorage: McpConfigStorage,
     _processMediaWithToolExecution: typeof processMediaWithToolExecution // Pass the function for testability or direct call
 ): void {
+    /**
+     * Internal helper function to process common steps for media messages.
+     * Downloads the file, prepares multimodal parts, updates history, calls Gemini,
+     * and delegates response processing.
+     * @param ctx - The Telegraf context object.
+     * @param fileId - The Telegram file ID of the media.
+     * @param mimeType - The MIME type of the media.
+     * @param caption - Optional caption provided with the media.
+     */
     const processMedia = async (ctx: Context, fileId: string, mimeType: string, caption?: string) => {
     if (!ctx.chat || !ctx.from) {
       console.warn('Received media without chat or from context:', ctx);
@@ -84,6 +124,7 @@ export function setupMediaHandlers(
     console.log(`Received media from chat ${chatId} / user ${userId}: ${fileId}, mime: ${mimeType}, caption: ${caption}`);
 
     try {
+      // Get the download URL for the file from Telegram.
       const fileUrl = await ctx.telegram.getFileLink(fileId);
       console.log(`Downloading file from: ${fileUrl}`);
       const { data, mime } = await downloadFile(fileUrl.toString()); // Assuming downloadFile returns buffer data and mime
@@ -106,7 +147,7 @@ export function setupMediaHandlers(
       }
 
 
-      if (multimodalParts.length === 0 && !caption) {
+      if (multimodalParts.length === 0) { // Check only multimodal parts, caption is handled separately
           ctx.reply("Could not process the file content.");
           return;
       }
@@ -114,11 +155,11 @@ export function setupMediaHandlers(
       // Add user message (caption + media info/parts) to history
       const userMessage = caption || `[${mimeType} file]`; // Text part for history overview
       const messageParts = caption ? [{text: caption}] : []; // Initial parts
-      if (multimodalParts.length > 0) {
-          // Add multimodal parts if successfully extracted
-           messageParts.push(...multimodalParts);
-      }
-      await conversationManager.addMessage(chatId, { role: 'user', parts: messageParts });
+      // Add the actual multimodal data parts to the message for Gemini
+      const partsForGemini = caption ? [{text: caption}, ...multimodalParts] : [...multimodalParts];
+      // Add message to history (potentially just with text representation for brevity if needed)
+      // Here we add the full parts for Gemini's context.
+      await conversationManager.addMessage(chatId, { role: 'user', parts: partsForGemini });
 
 
       // Get conversation history
@@ -136,9 +177,9 @@ export function setupMediaHandlers(
         // Decide if you want to proceed with default/shared settings or inform the user
       }
 
-      // Call Gemini with multimodal input
+      // Call Gemini with history, tools, the multimodal parts for this turn, and user settings.
       // Pass user settings to GeminiClient if needed
-      const geminiResponse = await geminiClient.generateContent(history, geminiTools, multimodalParts, userSettings || undefined);
+      const geminiResponse = await geminiClient.generateContent(history, geminiTools, undefined, userSettings || undefined); // Pass history which now includes the media parts
 
        // Use the refactored tool execution logic
        await _processMediaWithToolExecution(ctx, geminiResponse, chatId, userId, mcpClientManager, geminiClient, conversationManager, userSettings);

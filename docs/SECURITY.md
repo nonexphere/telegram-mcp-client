@@ -29,12 +29,16 @@ Handling API keys (Gemini, potentially MCP server keys) is sensitive.
 
 ## 3. MCP Server Management
 
-Allowing users to configure and launch external processes/services (especially stdio) is a major security boundary.
+Permitir que usuários configurem e iniciem processos/serviços externos (especialmente `stdio`) é um limite de segurança importante.
 
 *   **Stdio Security:**
-    *   Running an arbitrary command provided by a user (via `command` and `args`) is a severe security risk. A malicious user could potentially run harmful code on your bot's hosting server.
-    *   **Mitigation for stdio:** For a public bot, strictly limit available stdio servers to a hardcoded allowlist of *pre-approved, trusted commands/scripts* managed by the bot owner. Do not allow arbitrary commands/paths from the user via the Mini App UI form. The form could instead offer a dropdown of *predefined stdio server types* (e.g., "Filesystem", "Weather") with fixed commands/args/env templates, perhaps allowing the user to fill in only *safe* parameters (like a root directory path *within a designated safe area* or API keys).
-    *   For a personal bot, be aware that adding a stdio server runs that process on your machine/server. Only add configurations you fully trust.
+    *   Executar um comando arbitrário fornecido por um usuário (via `command` e `args`) é um risco de segurança grave. Um usuário mal-intencionado poderia executar código prejudicial no servidor de hospedagem do seu bot.
+    *   **Mitigation for stdio:**
+        *   **Restrição de Administrador (Implementado):** A configuração de servidores MCP do tipo `stdio` agora é restrita a IDs de usuário do Telegram especificados na variável de ambiente `ADMIN_USER_IDS`. Isso garante que apenas usuários confiáveis possam configurar processos `stdio`. Certifique-se de que `ADMIN_USER_IDS` esteja configurado corretamente no seu ambiente `.env`.
+        *   Se `ADMIN_USER_IDS` não estiver definido ou estiver vazio, nenhum usuário poderá configurar servidores `stdio` através da API da Mini App.
+        *   Para um bot pessoal onde você é o único administrador, defina seu ID de usuário do Telegram em `ADMIN_USER_IDS`.
+        *   Para bots públicos, esta é uma medida de segurança crucial. Não adicione IDs de usuários não confiáveis a esta lista.
+    *   Mesmo para administradores, tenha cuidado ao adicionar configurações `stdio` e certifique-se de que os comandos e scripts configurados são seguros e de fontes confiáveis.
 *   **HTTP Security:**
     *   Connecting to an arbitrary HTTP URL provided by a user is less risky than running a local process but still exposes your bot to potential network attacks (e.g., SSRF, connecting to malicious endpoints).
     *   **Mitigation for http:** Validate URLs to prevent connection to internal networks (SSRF). Be mindful of timeout and resource limits when connecting to external HTTP endpoints.

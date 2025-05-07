@@ -34,6 +34,7 @@ This section allows you to manage the external tools and data sources available 
     *   **Transport Type:** Select the communication method the bot should use to connect to the server (either `stdio` or `http`).
         *   **stdio:** For local processes. Requires the `Command`, optional `Args`, and optional `Env` fields.
         *   **http:** For remote servers accessible via HTTP. Requires the `URL` field.
+        *   **Nota:** A opção `stdio` pode estar desabilitada ou restrita se você não for um administrador configurado do bot.
     *   **Command, Args, Env (for stdio):** Provide the executable command, optional command-line arguments (as a JSON array), and optional environment variables (as a JSON object) needed to start the stdio server process.
     *   **URL (for http):** Provide the base URL of the HTTP MCP endpoint.
     *   Click "Add Server" to save the configuration to the database and attempt to connect.

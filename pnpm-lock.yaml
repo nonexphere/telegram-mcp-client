@@ -15,8 +15,8 @@ importers:
         specifier: ^1.11.0
         version: 1.11.0
       '@prisma/client':
-        specifier: ^6.7.0
-        version: 6.7.0(prisma@5.22.0)(typescript@5.8.3)
+        specifier: ^5.17.0
+        version: 5.22.0(prisma@5.22.0)
       body-parser:
         specifier: ^1.20.2
         version: 1.20.3
@@ -32,6 +32,9 @@ importers:
       telegraf:
         specifier: ^4.16.1
         version: 4.16.3(encoding@0.1.13)
+      zod:
+        specifier: ^3.24.4
+        version: 3.24.4
     devDependencies:
       '@types/body-parser':
         specifier: ^1.19.5
@@ -283,16 +286,13 @@ packages:
     resolution: {integrity: sha512-ROFF39F6ZrnzSUEmQQZUar0Jt4xVoP9WnDRdWwF4NNcXs3xBTLgBUDoOwW141y1jP+S8nahIbdxbFC7IShw9Iw==}
     engines: {node: ^12.20.0 || ^14.18.0 || >=16.0.0}
 
-  '@prisma/client@6.7.0':
-    resolution: {integrity: sha512-+k61zZn1XHjbZul8q6TdQLpuI/cvyfil87zqK2zpreNIXyXtpUv3+H/oM69hcsFcZXaokHJIzPAt5Z8C8eK2QA==}
-    engines: {node: '>=18.18'}
+  '@prisma/client@5.22.0':
+    resolution: {integrity: sha512-M0SVXfyHnQREBKxCgyo7sffrKttwE6R8PMq330MIUF0pTwjUhLbW84pFDlf06B27XyCR++VtjugEnIHdr07SVA==}
+    engines: {node: '>=16.13'}
     peerDependencies:
       prisma: '*'
-      typescript: '>=5.1.0'
     peerDependenciesMeta:
       prisma:
-        optional: true
-      typescript:
         optional: true
 
   '@prisma/debug@5.22.0':
@@ -1612,10 +1612,9 @@ snapshots:
 
   '@pkgr/core@0.2.4': {}
 
-  '@prisma/client@6.7.0(prisma@5.22.0)(typescript@5.8.3)':
+  '@prisma/client@5.22.0(prisma@5.22.0)':
     optionalDependencies:
       prisma: 5.22.0
-      typescript: 5.8.3
 
   '@prisma/debug@5.22.0': {}
 

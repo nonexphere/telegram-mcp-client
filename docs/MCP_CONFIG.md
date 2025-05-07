@@ -35,6 +35,9 @@ or
 *   `env` (object, optional): **Optional if `type` is `"stdio"`.** A key-value object defining environment variables to set for the server process. These will be merged with the current process's environment variables. Useful for passing API keys or specific server settings needed by the server itself.
 *   `url` (string, optional): **Required if `type` is `"http"`.** The base URL of the MCP server's HTTP endpoint. (e.g., `"http://localhost:8000/mcp"`).
 
+**Importante sobre o tipo `stdio`:**
+A configuração de servidores MCP do tipo `stdio` é restrita a usuários administradores definidos na configuração do bot (via variável de ambiente `ADMIN_USER_IDS`). Se você não for um administrador, a opção de adicionar servidores `stdio` pode estar desabilitada ou não funcional na Mini App.
+
 ## Adding/Managing Configurations
 
 Use the MCP Servers section in the [Mini App UI](/docs/MINIAPP_GUIDE.md) to add, view, and delete your configurations.

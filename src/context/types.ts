@@ -1,10 +1,19 @@
-// Define types for user-specific configurations
+/**
+ * @file Defines TypeScript interfaces for user configuration structures.
+ */
 
+/**
+ * Settings related to the system prompt or instructions for Gemini.
+ */
 export interface PromptSystemSettings {
     systemInstruction?: string; // Gemini system instruction
     // Add other prompt-specific settings here
 }
 
+/**
+ * General user settings, including Gemini model preferences, generation parameters,
+ * safety settings, and feature flags.
+ */
 export interface GeneralUserSettings {
     geminiModel?: string; // Preferred Gemini model
     temperature?: number; // Gemini temperature
@@ -17,7 +26,10 @@ export interface GeneralUserSettings {
     // Add other general settings here
 }
 
-
+/**
+ * Represents the complete configuration for a user, combining API keys,
+ * prompt settings, and general settings.
+ */
 export interface UserConfiguration {
     userId: number;
     geminiApiKey?: string; // User's own Gemini API key (potentially encrypted)

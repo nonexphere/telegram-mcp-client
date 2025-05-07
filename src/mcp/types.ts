@@ -1,4 +1,10 @@
-// Define the structure for MCP server configurations
+/**
+ * @file Defines TypeScript interfaces related to Model Context Protocol (MCP) configurations.
+ */
+
+/**
+ * Represents the full configuration for an MCP server connection.
+ */
 export interface MCPConfig {
   name: string;
   type: 'stdio' | 'http'; // Transport type
@@ -9,8 +15,10 @@ export interface MCPConfig {
   // Add other config properties if needed
 }
 
-// MCPConfig as stored in the configJson field, where 'name' might be omitted
-// because it's a separate column in the McpConfig table.
+/**
+ * Represents the MCP configuration structure as stored in the `configJson` field in the database,
+ * where the 'name' property might be omitted because it's stored as a separate column.
+ */
 export interface MCPConfigWithOptionalName {
   name?: string; // Name is optional here as it's a top-level field in the DB
   type: 'stdio' | 'http';

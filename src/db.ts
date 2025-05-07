@@ -2,10 +2,19 @@ import { PrismaClient } from '@prisma/client';
 
 let prismaInstance: PrismaClient | null = null;
 
+/**
+ * Initializes the Prisma Client instance if it hasn't been already.
+ * Ensures a connection to the database can be established.
+ * Exits the process if initialization fails.
+ * @returns A promise resolving to the initialized PrismaClient instance.
+ */
 export async function initDb(): Promise<PrismaClient> {
+  // Return existing instance if already initialized.
   if (prismaInstance) {
     return prismaInstance;
   }
+
+  // Attempt to create and connect the Prisma Client.
   try {
     // Prisma Client automatically handles connection pooling.
     // The schema and database creation are handled by `prisma migrate dev`.
@@ -20,12 +29,21 @@ export async function initDb(): Promise<PrismaClient> {
   }
 }
 
+/**
+ * Retrieves the singleton Prisma Client instance.
+ * Initializes it first if necessary.
+ * @returns A promise resolving to the PrismaClient instance.
+ */
 export async function getDb(): Promise<PrismaClient> {
   if (!prismaInstance) {
     return await initDb();
   }
   return prismaInstance;
 }
+
+/**
+ * Closes the Prisma Client database connection if it's currently open.
+ */
 
 export async function closeDb(): Promise<void> {
   if (prismaInstance) {

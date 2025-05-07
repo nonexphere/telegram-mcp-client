@@ -1,5 +1,6 @@
 /**
  * @file Maps Model Context Protocol (MCP) Tool schemas to Google Gemini FunctionDeclarations.
+ * TODO: Consider using zod-to-json-schema for more robust conversion if MCP SDK exposes zod schemas directly.
  */
 
 import { FunctionDeclaration, Type } from '@google/genai/node'; // Changed from '@google/genai'

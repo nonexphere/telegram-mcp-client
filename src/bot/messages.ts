@@ -1,3 +1,7 @@
+/**
+ * @file Sets up message handlers for the Telegraf bot, specifically for text messages.
+ * Contains the core logic for processing user input, interacting with Gemini and MCP.
+ */
 import { Telegraf, Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { McpClientManager } from '../mcp/mcpClientManager.js';
@@ -6,6 +10,15 @@ import { ConversationManager } from '../context/conversation.js';
 import { McpConfigStorage } from '../mcp/storage.js';
 import { UserConfiguration } from '../context/types.js';
 
+/**
+ * Registers message handlers, primarily for text messages.
+ * This function orchestrates the main conversation flow.
+ * @param bot - The Telegraf bot instance.
+ * @param mcpClientManager - Instance for managing MCP clients.
+ * @param geminiClient - Instance for interacting with Gemini.
+ * @param conversationManager - Instance for managing chat history.
+ * @param mcpConfigStorage - Instance for accessing user configurations.
+ */
 export function setupMessageHandlers(
   bot: Telegraf<Context>,
   mcpClientManager: McpClientManager,
@@ -14,6 +27,7 @@ export function setupMessageHandlers(
   mcpConfigStorage: McpConfigStorage // Added McpConfigStorage
 ): void {
 
+  // Handler for incoming text messages.
   bot.on(message('text'), async (ctx) => {
     const chatId = ctx.chat.id; // Use chat.id for group/supergroup support
     const userId = ctx.from.id; // Use from.id for user-specific settings
@@ -41,11 +55,12 @@ export function setupMessageHandlers(
         // Decide if you want to proceed with default/shared settings or inform the user
       }
 
-      // Call Gemini
+      // Call Gemini with history, tools, and user settings.
       // Pass user settings to GeminiClient if needed for per-user configuration
       const geminiResponse = await geminiClient.generateContent(history, geminiTools, undefined, userSettings || undefined);
 
       // Process Gemini's response
+      // Check if Gemini requested function calls (tool usage).
       if (geminiResponse.functionCalls && geminiResponse.functionCalls.length > 0) {
         console.log('Gemini wants to call functions:', geminiResponse.functionCalls);
 
@@ -53,6 +68,7 @@ export function setupMessageHandlers(
         const toolResults: any[] = []; // Store results to send back to Gemini
 
         for (const functionCall of geminiResponse.functionCalls) {
+          // Iterate through each requested function call.
           console.log(`Attempting to call MCP tool: ${functionCall.name} for chat ${chatId}`);
           try {
             // Call the corresponding MCP tool via the manager
@@ -60,7 +76,7 @@ export function setupMessageHandlers(
             const mcpToolResult = await mcpClientManager.callTool(userId, functionCall); // Pass user ID
 
             // Store result in a format Gemini understands (functionResponse)
-            const geminiFunctionResponse: { name: string; response: { result?: any; error?: string } } = {
+            const geminiFunctionResponse = {
                 name: functionCall.name,
                 response: {}
             };
@@ -77,7 +93,7 @@ export function setupMessageHandlers(
              // Optionally notify user of tool execution success
              // ctx.reply(`Executed tool: ${functionCall.name}`);
 
-
+          // Handle errors during tool execution.
           } catch (toolError: any) {
             console.error(`Error executing MCP tool "${functionCall.name}" for chat ${chatId}:`, toolError);
              // Include tool execution errors in the response to Gemini
@@ -92,12 +108,13 @@ export function setupMessageHandlers(
         }
 
         // Add Gemini's function call response and the tool results to history
+        // Gemini's request to call functions is added as a 'model' turn.
          await conversationManager.addMessage(chatId, { role: 'model', parts: geminiResponse.functionCalls.map((fc: any) => ({ functionCall: fc })) });
-         // Add tool results as user role for Gemini's follow-up turn
+         // The results from the tools are added as a 'user' turn (specifically, functionResponse parts).
          await conversationManager.addMessage(chatId, { role: 'user', parts: toolResults.map(tr => ({ functionResponse: tr })) });
 
 
-        // --- Call Gemini again with tool results ---
+        // --- Call Gemini again with the updated history including tool results ---
         const historyWithToolResults = await conversationManager.getHistory(chatId);
         const finalGeminiResponse = await geminiClient.generateContent(historyWithToolResults, geminiTools, undefined, userSettings || undefined);
 
@@ -115,7 +132,7 @@ export function setupMessageHandlers(
 
 
       } else {
-        // Gemini returned a direct text response
+        // Gemini returned a direct text response (no function calls requested).
         const textResponse = geminiResponse.text;
         if (textResponse) {
              console.log('Gemini direct text response:', textResponse);
@@ -128,6 +145,7 @@ export function setupMessageHandlers(
         }
       }
 
+    // Catch-all error handler for the entire message processing flow.
     } catch (error: any) {
       console.error('Error during message processing for chat', chatId, ':', error);
       ctx.reply('An error occurred while processing your request. Please try again later or contact support if the issue persists.');

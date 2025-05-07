@@ -13,44 +13,39 @@ const addMcpForm = document.getElementById('add-mcp-form');
 const mcpTypeSelect = document.getElementById('mcp-type');
 const stdioFields = document.getElementById('stdio-config-fields');
 const httpFields = document.getElementById('http-config-fields');
-const stdioTypeSelect = document.getElementById('mcp-stdio-type'); // Dropdown for stdio types
 const clearHistoryButton = document.getElementById('clear-history');
+const stdioWarning = document.getElementById('stdio-warning');
+
+let currentUserIsAdmin = false; // Variável para guardar o status
 
 
 // Show relevant fields based on selected transport type
 mcpTypeSelect.addEventListener('change', (event) => {
-    if (event.target.value === 'stdio') {
-        stdioFields.classList.remove('hidden');
-        httpFields.classList.add('hidden');
-         stdioTypeSelect.setAttribute('required', 'true'); // Require selecting a type
-         document.getElementById('mcp-url').removeAttribute('required');
-    } else { // http
-        stdioFields.classList.add('hidden');
-        httpFields.classList.remove('hidden');
-         stdioTypeSelect.removeAttribute('required');
-         document.getElementById('mcp-url').setAttribute('required', 'true');
-    }
+    const isStdio = event.target.value === 'stdio';
+    stdioFields.classList.toggle('hidden', !isStdio);
+    httpFields.classList.toggle('hidden', isStdio);
+
+    document.getElementById('mcp-command').required = isStdio;
+    document.getElementById('mcp-url').required = !isStdio;
+
+    adjustMcpFormForAdminStatus();
 });
 
 // Initially trigger change to show default fields
 mcpTypeSelect.dispatchEvent(new Event('change'));
 
-
 // Function to fetch and display current configuration
 async function loadConfig() {
     try {
-        // TODO: Pass initData securely (e.g., in a header)
-        const response = await fetch('/api/user_config', { // Example passing in query
-            headers: {
-                'X-Telegram-Init-Data': app.initData
-            }
-        });
+        const response = await fetch(`/api/user_config?initData=${app.initData}`);
         if (!response.ok) {
             const errorBody = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
-            throw new Error(errorBody.error);
+            throw new Error(errorBody.error || `HTTP error! status: ${response.status}`);
         }
         const config = await response.json();
         console.log('Loaded config:', config);
+
+        currentUserIsAdmin = config.isAdmin === true; // Armazena o status de admin
 
         // Populate settings form
         const settings = config.settings || { promptSystemSettings: {}, generalSettings: {} };
@@ -76,11 +71,43 @@ async function loadConfig() {
             button.addEventListener('click', deleteMcp);
         });
 
+        // ** Ajuste inicial da UI com base no status de admin **
+        adjustMcpFormForAdminStatus();
+
     } catch (error) {
         console.error('Error loading config:', error);
         mcpList.innerHTML = '<li>Failed to load configurations.</li>';
          // Show error to user if possible
         app.showAlert('Failed to load configurations: ' + error.message);
+    }
+}
+
+// Function to adjust the MCP form based on admin status
+function adjustMcpFormForAdminStatus() {
+    const isStdioSelected = mcpTypeSelect.value === 'stdio';
+    const addMcpButton = addMcpForm.querySelector('button[type="submit"]');
+    const stdioOption = mcpTypeSelect.querySelector('option[value="stdio"]');
+
+    if (stdioOption) {
+        stdioOption.disabled = !currentUserIsAdmin;
+        if (isStdioSelected && !currentUserIsAdmin) {
+            mcpTypeSelect.value = 'http'; // Force selection to http
+            mcpTypeSelect.dispatchEvent(new Event('change')); // Trigger change to update UI
+            // After dispatching change, isStdioSelected might be outdated, re-evaluate for button
+            if (addMcpButton) addMcpButton.disabled = false; // HTTP should be enabled
+            if (stdioWarning) stdioWarning.classList.remove('hidden');
+            return; // Exit early as UI was re-triggered
+        }
+    }
+
+    if (isStdioSelected && !currentUserIsAdmin) {
+        if (addMcpButton) addMcpButton.disabled = true;
+        if (stdioWarning) stdioWarning.classList.remove('hidden');
+        console.log("Stdio selected, user is not admin. Disabling add button.");
+    } else {
+        if (addMcpButton) addMcpButton.disabled = false;
+        if (stdioWarning) stdioWarning.classList.add('hidden');
+        console.log("Stdio not selected or user is admin. Enabling add button.");
     }
 }
 
@@ -91,17 +118,15 @@ settingsForm.addEventListener('submit', async (event) => {
 
     // Structure the data according to the UserConfiguration interface
     const settings = {
-         // userId will be added on the server from validated initData
-         geminiApiKey: formData.get('geminiApiKey'), // Handle securely!
+         geminiApiKey: formData.get('geminiApiKey'),
          promptSystemSettings: {
              systemInstruction: formData.get('systemInstruction')
          },
          generalSettings: {
              geminiModel: formData.get('geminiModel'),
-             temperature: parseFloat(formData.get('temperature')), // Parse to number
-             safetySettings: undefined, // Will be populated if valid JSON
-             googleSearchEnabled: formData.get('googleSearchEnabled') === 'on', // Checkbox value
-              // Add other general settings here
+             temperature: parseFloat(formData.get('temperature')),
+             safetySettings: undefined,
+             googleSearchEnabled: formData.get('googleSearchEnabled') === 'on',
          }
     };
     const safetySettingsString = formData.get('safetySettings');
@@ -113,21 +138,21 @@ settingsForm.addEventListener('submit', async (event) => {
         }
     }
 
-    // Clean up empty fields before sending
     for (const key in settings.promptSystemSettings) {
         if (settings.promptSystemSettings[key] === '') delete settings.promptSystemSettings[key];
     }
     for (const key in settings.generalSettings) {
-        if (settings.generalSettings[key] === '') delete settings.generalSettings[key];
+        if (settings.generalSettings[key] === '' || (typeof settings.generalSettings[key] === 'number' && isNaN(settings.generalSettings[key]))) {
+            delete settings.generalSettings[key];
+        }
     }
-    // Note: Handling geminiApiKey secure transmission/storage is critical.
 
     try {
         const response = await fetch('/api/user_settings', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                 'X-Telegram-Init-Data': app.initData
+                'X-Telegram-Init-Data': app.initData
             },
             body: JSON.stringify(settings)
         });
@@ -140,7 +165,6 @@ settingsForm.addEventListener('submit', async (event) => {
         if (result.success) {
             app.showNotification({ message: 'Settings saved!', type: 'success' });
              // Clear the API key field after successful save for security
-            document.getElementById('gemini-api-key').value = '';
 
         } else {
             throw new Error(result.error || 'Failed to save settings.');
@@ -158,7 +182,6 @@ addMcpForm.addEventListener('submit', async (event) => {
     const formData = new FormData(addMcpForm);
 
     const type = formData.get('type');
-
     const config = {
         name: formData.get('name'),
         type: type,
@@ -169,10 +192,8 @@ addMcpForm.addEventListener('submit', async (event) => {
         // Http fields
         url: undefined,
     };
-
-    // Basic validation
     if (!config.name || !config.type) {
-        app.showAlert('Please provide a server name and select a transport type.');
+        app.showAlert('Server name and transport type are required.');
         return;
     }
 
@@ -181,34 +202,15 @@ addMcpForm.addEventListener('submit', async (event) => {
         // Attempt to parse args and env as JSON, handle errors
         try {
             const args = formData.get('args');
-             config.args = args ? JSON.parse(args) : undefined;
-            // TODO: Add validation specific to the selected stdioServerType if needed
+            config.args = args ? JSON.parse(args) : undefined;
         } catch (e) {
-             app.showAlert('Invalid JSON for Args field.');
-             return;
+            app.showAlert('Invalid JSON for Args field.'); return;
         }
          try {
             const env = formData.get('env');
-             config.env = env ? JSON.parse(env) : undefined;
-            // TODO: Add validation specific to the selected stdioServerType if needed
+            config.env = env ? JSON.parse(env) : undefined;
         } catch (e) {
-             app.showAlert('Invalid JSON for Env field.');
-             return;
-        }
-
-        // --- Derive command/args based on selected stdio type ---
-        const stdioServerType = formData.get('stdioServerType');
-        if (!stdioServerType) {
-            app.showAlert('Please select a Stdio Server Type.');
-            return;
-        }
-        if (stdioServerType === 'npx-filesystem') {
-            config.command = 'npx'; // Command is now fixed based on type
-            // Args might be partially fixed, partially from input, needs careful design
-            // For now, keep args from the form, but backend MUST validate them
-        } else {
-            app.showAlert(`Unknown stdio server type: ${stdioServerType}`);
-            return;
+            app.showAlert('Invalid JSON for Env field.'); return;
         }
 
     } else if (type === 'http') {
@@ -223,7 +225,7 @@ addMcpForm.addEventListener('submit', async (event) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                 'X-Telegram-Init-Data': app.initData
+                'X-Telegram-Init-Data': app.initData
             },
             body: JSON.stringify(config)
         });
@@ -259,7 +261,7 @@ async function deleteMcp(event) {
                 const response = await fetch(`/api/mcps/${serverName}`, {
                     method: 'DELETE',
                      headers: {
-                         'X-Telegram-Init-Data': app.initData
+                        'X-Telegram-Init-Data': app.initData
                      }
                 });
 
@@ -292,6 +294,7 @@ clearHistoryButton.addEventListener('click', async () => {
                 const response = await fetch('/api/clear_history', {
                     method: 'POST',
                     headers: {
+                        'Content-Type': 'application/json', // Though no body, good practice
                         'X-Telegram-Init-Data': app.initData
                     }
                 });

@@ -14,7 +14,7 @@ import { ConversationManager } from '../context/conversation.js';
 import { getMcpConfigStorage } from '../mcp/storage.js';
 import { UserConfiguration } from '../context/types.js';
 import { MCPConfig } from '../mcp/types.js';
-import { z } from 'zod'; // Import Zod
+import { z } from 'zod';
 
 // Get the directory name of the current module
 const __filename = fileURLToPath(import.meta.url);
@@ -25,34 +25,11 @@ const SafetySettingSchema = z.object({
     category: z.string(), // Ideally use z.enum with HarmCategory values
     threshold: z.string(), // Ideally use z.enum with HarmBlockThreshold values
 });
-
 const UserSettingsPayloadSchema = z.object({
     geminiApiKey: z.string().optional().nullable(),
     promptSystemSettings: z.object({ systemInstruction: z.string().optional().nullable() }).passthrough().optional().nullable(),
     generalSettings: z.object({ geminiModel: z.string().optional().nullable(), temperature: z.number().min(0).max(1).optional().nullable(), safetySettings: z.array(SafetySettingSchema).optional().nullable(), googleSearchEnabled: z.boolean().optional().nullable() }).passthrough().optional().nullable(),
 }).passthrough(); // Allow other fields potentially
-
-const McpConfigPayloadSchema = z.object({
-    name: z.string().min(1),
-    type: z.enum(['stdio', 'http']),
-    command: z.string().optional(),
-    args: z.array(z.string()).optional(),
-    env: z.record(z.string().optional()).optional(), // Allow string or undefined values
-    url: z.string().url().optional(),
-}).refine(data => (data.type === 'stdio' ? !!data.command : true), {
-    message: "Command is required for stdio type",
-    path: ["command"],
-}).refine(data => (data.type === 'http' ? !!data.url : true), {
-    message: "URL is required for http type",
-    path: ["url"],
-});
-
-// --- Allowed stdio commands (Example Allowlist) ---
-// In a real application, this might come from config or be more sophisticated.
-const ALLOWED_STDIO_COMMANDS = [
-    'npx', // Allow npx to run known packages
-    // Add other trusted commands/scripts here, e.g., '/usr/local/bin/my-safe-script'
-];
 
 // --- Server Setup Function ---
 
@@ -70,6 +47,7 @@ export function setupWebAppServer(
     mcpClientManager: McpClientManager,
     geminiClient: GeminiClient,
     conversationManager: ConversationManager,
+    adminUserIds: number[]
 ): void {
     const mcpConfigStorage = getMcpConfigStorage(db); 
     const publicPath = join(__dirname, 'public');
@@ -107,6 +85,8 @@ export function setupWebAppServer(
         (req as any).telegramUserId = user.id;
         (req as any).telegramUser = user; 
         console.log(`Validated Mini App request for user ID: ${user.id}`);
+        // Anexar status de admin ao request para uso nos endpoints
+        (req as any).isAdmin = adminUserIds.includes(user.id);
         next();
     };
 
@@ -114,32 +94,50 @@ export function setupWebAppServer(
     app.use('/api', validateTelegramInitDataMiddleware);
 
     app.get('/api/user_config', async (req: Request, res: Response) => {
+        /**
+         * @route GET /api/user_config
+         * @group API - Mini App Backend
+         * @summary Retrieves the user's current settings and MCP configurations.
+         * @security TelegramInitData
+         * @returns {object} 200 - An object containing 'settings' and 'mcps'.
+         * @returns {object} 500 - Internal server error.
+         */
         const userId = (req as any).telegramUserId;
+        const isAdmin = (req as any).isAdmin; // Obtenha o status de admin
         try {
             const userConfig = await mcpConfigStorage.getUserConfiguration(userId);
             const mcpConfigs = await mcpConfigStorage.getUserMcpConfigs(userId);
             res.json({
                 settings: userConfig || { userId: userId, promptSystemSettings: {}, generalSettings: {} },
-                mcps: mcpConfigs
+                mcps: mcpConfigs,
+                isAdmin: isAdmin // Envie o status de admin para o frontend
             });
         } catch (error: any) {
             console.error(`Error getting user config for user ${userId}:`, error.message);
-            res.status(500).json({ error: 'Failed to retrieve configuration. Please try again later.' });
+            res.status(500).json({ error: 'Failed to retrieve configuration. Please check server logs.' });
         }
     });
 
     app.post('/api/user_settings', async (req: Request, res: Response) => {
+        /**
+         * @route POST /api/user_settings
+         * @group API - Mini App Backend
+         * @summary Saves or updates the user's general settings (API key, model, etc.).
+         * @security TelegramInitData
+         * @returns {object} 200 - Success message.
+         * @returns {object} 400 - Invalid payload format.
+         * @returns {object} 500 - Internal server error.
+         */
         const userId = (req as any).telegramUserId;
-
-        // Validate payload with Zod
-        const validationResult = UserSettingsPayloadSchema.safeParse(req.body);
-        if (!validationResult.success) {
-            console.warn(`Invalid user settings payload for user ${userId}:`, validationResult.error.errors);
-            return res.status(400).json({ error: 'Invalid settings format.', details: validationResult.error.errors });
-        }
-        const updatedSettingsBody = validationResult.data;
-
         try {
+            // Validate payload with Zod
+            const validationResult = UserSettingsPayloadSchema.safeParse(req.body);
+            if (!validationResult.success) {
+                console.warn(`Invalid user settings payload for user ${userId}:`, validationResult.error.errors);
+                return res.status(400).json({ error: 'Invalid settings format.', details: validationResult.error.errors });
+            }
+            const updatedSettingsBody = validationResult.data;
+
             const existingConfig = await mcpConfigStorage.getUserConfiguration(userId) || {
                 userId: userId,
                 promptSystemSettings: {},
@@ -172,50 +170,56 @@ export function setupWebAppServer(
             res.json({ success: true, message: 'Settings saved successfully.' });
         } catch (error: any) {
             console.error(`Error saving user settings for user ${userId}:`, error.message);
-            res.status(500).json({ error: 'Failed to save settings. Please try again later.' });
+            res.status(500).json({ error: 'Failed to save settings. Please check server logs.' });
         }
     });
 
     app.post('/api/mcps', async (req: Request, res: Response) => {
+        /**
+         * @route POST /api/mcps
+         * @group API - Mini App Backend
+         * @summary Adds or updates an MCP server configuration for the user.
+         * @security TelegramInitData
+         * @returns {object} 200 - Success message.
+         * @returns {object} 400 - Invalid payload format or disallowed stdio command.
+         * @returns {object} 500 - Internal server error.
+         */
         const userId = (req as any).telegramUserId;
-
-        // Validate payload with Zod
-        const validationResult = McpConfigPayloadSchema.safeParse(req.body);
-        if (!validationResult.success) {
-            console.warn(`Invalid MCP config payload for user ${userId}:`, validationResult.error.errors);
-            return res.status(400).json({ error: 'Invalid MCP configuration format.', details: validationResult.error.errors });
-        }
-        const config = validationResult.data as MCPConfig; // Cast after validation
+        const isAdmin = (req as any).isAdmin;
+        const config: MCPConfig = req.body;
 
         try {
-
-            // Security check for stdio commands
-            if (config.type === 'stdio' && config.command) {
-                // --- Stricter Stdio Security ---
-                // Option 1: Simple Allowlist (as implemented here)
-                const commandBase = config.command.split(' ')[0]; // Get the base command
-                if (!ALLOWED_STDIO_COMMANDS.includes(commandBase)) {
-                    console.warn(`Attempt to add potentially unsafe stdio command by user ${userId}: ${config.command}`);
-                    return res.status(400).json({ error: `Command "${commandBase}" is not allowed for stdio servers.` });
-                }
-                // Option 2: Predefined Types (More Secure)
-                // Instead of free 'command' input, the UI would offer types like 'filesystem'.
-                // The backend would map 'filesystem' to a safe, predefined command/args template.
-                // Example: if (config.predefinedType === 'filesystem') { config.command = 'npx'; config.args = ['-y', '@mcp/server-filesystem', validatedPath]; }
-
-                // TODO: Add further sanitization/validation for `args` and `env` if needed.
+            if (!config.name || !config.type) {
+                return res.status(400).json({ error: 'MCP config name and type are required.'});
             }
+
+            // *** INÍCIO DA VERIFICAÇÃO DE PERMISSÃO ***
+            if (config.type === 'stdio' && !isAdmin) {
+                console.warn(`User ${userId} (not admin) attempted to add stdio MCP server "${config.name}". Denied.`);
+                return res.status(403).json({ error: "Forbidden: Only administrators can add 'stdio' type MCP servers." });
+            }
+            // *** FIM DA VERIFICAÇÃO DE PERMISSÃO ***
 
             await mcpConfigStorage.saveUserMcpConfig(userId, config);
             await mcpClientManager.addServer(userId, config); 
+            console.log(`User ${userId} successfully added ${config.type} MCP server "${config.name}".`);
             res.json({ success: true, message: `MCP server "${config.name}" added.` });
         } catch (error: any) {
             console.error(`Error adding MCP config for user ${userId}:`, error.message);
-            res.status(500).json({ error: 'Failed to add MCP server config. Please try again later.' });
+            res.status(500).json({ error: error.message || 'Failed to add MCP server config.' });
         }
     });
 
     app.delete('/api/mcps/:serverName', async (req: Request, res: Response) => {
+        /**
+         * @route DELETE /api/mcps/{serverName}
+         * @group API - Mini App Backend
+         * @summary Deletes a specific MCP server configuration for the user.
+         * @param {string} serverName.path.required - The name of the server configuration to delete.
+         * @security TelegramInitData
+         * @returns {object} 200 - Success message.
+         * @returns {object} 500 - Internal server error.
+         */
         const userId = (req as any).telegramUserId;
         const serverName = req.params.serverName;
         if (!serverName) {
@@ -227,11 +231,19 @@ export function setupWebAppServer(
             res.json({ success: true, message: `MCP server "${serverName}" deleted.` });
         } catch (error: any) {
             console.error(`Error deleting MCP config "${serverName}" for user ${userId}:`, error.message);
-            res.status(500).json({ error: 'Failed to delete MCP server config. Please try again later.' });
+            res.status(500).json({ error: 'Failed to delete MCP server config. Please check server logs.' });
         }
     });
 
     app.post('/api/clear_history', async (req: Request, res: Response) => {
+        /**
+         * @route POST /api/clear_history
+         * @group API - Mini App Backend
+         * @summary Clears the chat history for the current user.
+         * @security TelegramInitData
+         * @returns {object} 200 - Success message.
+         * @returns {object} 500 - Internal server error.
+         */
         const userId = (req as any).telegramUserId; 
         const chatId = (req as any).telegramUser?.id; 
 
@@ -244,7 +256,7 @@ export function setupWebAppServer(
             res.json({ success: true, message: 'Chat history cleared.' });
         } catch (error: any) {
             console.error(`Error clearing chat history for chat ${chatId} (user ${userId}):`, error.message);
-            res.status(500).json({ error: 'Failed to clear chat history. Please try again later.' });
+            res.status(500).json({ error: 'Failed to clear chat history. Please check server logs.' });
         }
     });
 }
