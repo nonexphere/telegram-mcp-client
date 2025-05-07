@@ -162,6 +162,7 @@ export class GeminiClient {
     multimodalParts?: any[], // Current turn multimodal parts
     userConfig?: UserConfiguration // User-specific settings
   ): Promise<{ functionCalls?: any[]; text?: string }> { 
+    let geminiInstance: GoogleGenAI;
     try {
       geminiInstance = this.getGeminiInstance(userConfig);
     } catch (e) {
@@ -241,8 +242,8 @@ export class GeminiClient {
 
       // Parse the response to extract function calls and/or text.
       const response = result.response;
-      const functionCalls = response.candidates?.[0]?.content?.parts?.filter(p => p.functionCall).map(p => p.functionCall);
-      const textResponse = response.text; 
+      const functionCalls = response.candidates?.[0]?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => p.functionCall);
+      const textResponse = response.text(); 
 
       return {
         functionCalls: functionCalls,

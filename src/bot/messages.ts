@@ -76,9 +76,9 @@ export function setupMessageHandlers(
             const mcpToolResult = await mcpClientManager.callTool(userId, functionCall); // Pass user ID
 
             // Store result in a format Gemini understands (functionResponse)
-            const geminiFunctionResponse = {
+            const geminiFunctionResponse: { name: string; response: { result?: any; error?: string } } = {
                 name: functionCall.name,
-                response: {}
+                response: {} 
             };
 
             if (mcpToolResult && !mcpToolResult.isError) {

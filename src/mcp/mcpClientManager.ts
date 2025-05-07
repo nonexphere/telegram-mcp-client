@@ -46,8 +46,7 @@ export class McpClientManager {
       for (const row of configsFromDb) { // Changed variable name here
         const userId = row.userId; // Corrected: use row.userId
         const name = row.name; 
-        const configData: MCPConfigWithOptionalName = row.configJson as MCPConfigWithOptionalName;
-        // Reconstruct the full MCPConfig object including the name.
+        const configData: MCPConfigWithOptionalName = JSON.parse(row.configJson as string) as MCPConfigWithOptionalName;        // Reconstruct the full MCPConfig object including the name.
         const config: MCPConfig = { ...configData, name };
 
         // Initialize the map for the user if it doesn't exist.
@@ -101,7 +100,7 @@ export class McpClientManager {
         data: {
           userId,
           name, // Save the name separately
-          configJson: configDataToStore, // Store the rest of the config as JSON
+          configJson: JSON.stringify(configDataToStore), // Store the rest of the config as JSON
         },
       });
       console.log(`MCP server config "${config.name}" added for user ${userId} in DB.`);
@@ -197,7 +196,7 @@ export class McpClientManager {
             select: { name: true, configJson: true },
         });
         if (dbEntry) {
-            const configData: MCPConfigWithOptionalName = dbEntry.configJson as MCPConfigWithOptionalName;
+            const configData: MCPConfigWithOptionalName = JSON.parse(dbEntry.configJson as string) as MCPConfigWithOptionalName;
             const config: MCPConfig = { ...configData, name: dbEntry.name };
 
             // Add loaded config to memory map.
@@ -218,13 +217,13 @@ export class McpClientManager {
     }
 
     // If client exists and is connected, return it.
-    if (serverEntry.client && serverEntry.client.isConnected()) {
+    if (serverEntry.client) { // Removed isConnected() check, rely on client object presence
       return serverEntry.client;
     }
 
     // If client exists but is not connected, dispose of the old instance.
-    if (serverEntry.client && !serverEntry.client.isConnected()) {
-        console.log(`Client for "${serverName}" for user ${userId} found but not connected. Disposing old client.`);
+    if (serverEntry.client) { // If client exists here, it means it wasn't returned above.
+        console.log(`Client for "${serverName}" for user ${userId} found but needs re-establishment or was not valid. Disposing old client.`);
         if (serverEntry.client.close) {
              try { await serverEntry.client.close(); } catch (e) { console.error('Error closing old client:', e); }
         }
@@ -251,11 +250,18 @@ export class McpClientManager {
       // Create the appropriate transport based on the configuration type.
       let transport;
       if (config.type === 'stdio') {
-        if (!config.command) throw new Error('Stdio config requires a command.');
+        if (!config.command) throw new Error('Stdio config requires a command.');        
+        const envVars: Record<string, string> = {};
+        const combinedEnv = { ...process.env, ...config.env }; // process.env first, then config.env to allow override
+        for (const key in combinedEnv) {
+            if (combinedEnv[key] !== undefined) {
+                envVars[key] = combinedEnv[key] as string; // Ensure it's a string
+            }
+        }
         transport = new StdioClientTransport({
           command: config.command,
           args: config.args || [],
-          env: { ...process.env, ...config.env }, 
+          env: envVars, 
         });
       } else if (config.type === 'http') {
         if (!config.url) throw new Error('HTTP config requires a url.');
@@ -298,7 +304,7 @@ export class McpClientManager {
       try {
         // Ensure the client is connected before attempting to list tools.
         const client = await this.connectClientForUser(userId, serverName);
-        if (!client || !client.isConnected()) {
+        if (!client) { // Removed isConnected() check
             console.warn(`Client for server "${serverName}" user ${userId} is not connected. Skipping tools.`);
             continue;
         }
@@ -342,7 +348,7 @@ export class McpClientManager {
 
     // Ensure the client for the target server is connected.
     const client = await this.connectClientForUser(userId, serverName);
-    if (!client || !client.isConnected()) {
+    if (!client) { // Removed isConnected() check
       throw new Error(`MCP server "${serverName}" is not connected for user ${userId}. Cannot call tool "${geminiToolName}".`);
     }
 
@@ -388,26 +394,26 @@ export class McpClientManager {
    */
   private setupClientListeners(userId: number, client: Client, serverNameForLog: string): void {
     // Listener for tool list changes from the server.
-    client.setNotificationHandler('notifications/tools/list_changed', async () => {
+    client.setNotificationHandler({ method: 'notifications/tools/list_changed' }, async () => {
       console.log(`Tools list changed notification from "${serverNameForLog}" for user ${userId}.`);
       // TODO: Implement logic to invalidate tool cache or notify GeminiClient
       // This might involve clearing a cached list of tools for this user/server
       // or emitting an event that relevant parts of the application can listen to.
     });
 
-    client.setNotificationHandler('notifications/resources/list_changed', async () => {
+    client.setNotificationHandler({ method: 'notifications/resources/list_changed' }, async () => {
       // Placeholder for handling resource list changes if needed in the future.
       console.log(`Resources list changed notification from "${serverNameForLog}" for user ${userId}.`);
     });
 
-    client.setNotificationHandler('notifications/message', (notification) => {
+    client.setNotificationHandler({ method: 'notifications/message' }, (notification: any) => { // Use any or the correct SDK type
       console.log(
-        `[MCP Log - ${serverNameForLog} - User ${userId} - ${notification.params.level}] ${JSON.stringify(notification.params.data)}`,
+        `[MCP Log - ${serverNameForLog} - User ${userId} - ${notification.params?.level}] ${JSON.stringify(notification.params?.data)}`,
       );
     });
 
     // Error handler for the client connection.
-    client.onerror = (error) => {
+    client.onerror = (error: Error) => {
       console.error(`MCP client "${serverNameForLog}" for user ${userId} encountered an error:`, error);
       const userClients = this.activeServers.get(userId);
       if (userClients && userClients.has(serverNameForLog)) {

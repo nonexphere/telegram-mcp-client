@@ -52,7 +52,7 @@ async function main() {
     const conversationManager = new ConversationManager(db);
     const geminiClient = new GeminiClient(SHARED_GEMINI_API_KEY);
 
-    const bot = new Telegraf(BOT_TOKEN);
+    const bot = new Telegraf(BOT_TOKEN!);
 
     // Simple middleware to log incoming updates.
     bot.use(async (ctx, next) => {

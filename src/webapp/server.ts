@@ -148,14 +148,37 @@ export function setupWebAppServer(
             // The McpConfigStorage.saveUserConfiguration method will handle stringifying the settings objects.
             const finalConfig: UserConfiguration = {
                 userId: userId,
-                geminiApiKey: updatedSettingsBody.geminiApiKey !== undefined ? updatedSettingsBody.geminiApiKey : existingConfig.geminiApiKey,
+                geminiApiKey: updatedSettingsBody.geminiApiKey !== undefined ? updatedSettingsBody.geminiApiKey : existingConfig?.geminiApiKey,
                 promptSystemSettings: {
-                    ...existingConfig.promptSystemSettings,
-                    ...(updatedSettingsBody.promptSystemSettings || {}),
+                    ...(existingConfig.promptSystemSettings || {}), // Base
+                    // Explicitly handle known fields from payload (null -> undefined), or if payload undefined, use base (which is existing)
+                    systemInstruction: updatedSettingsBody.promptSystemSettings?.systemInstruction === null 
+                        ? undefined 
+                        : (updatedSettingsBody.promptSystemSettings?.systemInstruction ?? existingConfig.promptSystemSettings?.systemInstruction),
+                    // Passthrough: spread payload fields that are not null and not already explicitly handled
+                    ...(updatedSettingsBody.promptSystemSettings 
+                        ? Object.fromEntries(Object.entries(updatedSettingsBody.promptSystemSettings).filter(([k,v]) => v !== null && k !== 'systemInstruction')) 
+                        : {}),
                 },
                 generalSettings: {
-                    ...existingConfig.generalSettings,
-                    ...(updatedSettingsBody.generalSettings || {}),
+                    ...(existingConfig.generalSettings || {}), // Base
+                    // Explicitly handle known fields
+                    geminiModel: updatedSettingsBody.generalSettings?.geminiModel === null 
+                        ? undefined 
+                        : (updatedSettingsBody.generalSettings?.geminiModel ?? existingConfig.generalSettings?.geminiModel),
+                    temperature: updatedSettingsBody.generalSettings?.temperature === null 
+                        ? undefined 
+                        : (updatedSettingsBody.generalSettings?.temperature ?? existingConfig.generalSettings?.temperature),
+                    safetySettings: updatedSettingsBody.generalSettings?.safetySettings === null 
+                        ? undefined 
+                        : (updatedSettingsBody.generalSettings?.safetySettings ?? existingConfig.generalSettings?.safetySettings),
+                    googleSearchEnabled: updatedSettingsBody.generalSettings?.googleSearchEnabled === null 
+                        ? undefined 
+                        : (updatedSettingsBody.generalSettings?.googleSearchEnabled ?? existingConfig.generalSettings?.googleSearchEnabled),
+                    // Passthrough: spread payload fields that are not null and not already explicitly handled
+                    ...(updatedSettingsBody.generalSettings 
+                        ? Object.fromEntries(Object.entries(updatedSettingsBody.generalSettings).filter(([k,v]) => v !== null && !['geminiModel', 'temperature', 'safetySettings', 'googleSearchEnabled'].includes(k))) 
+                        : {}),
                 },
             };
 
