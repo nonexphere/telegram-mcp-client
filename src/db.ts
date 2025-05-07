@@ -1,48 +1,78 @@
-import Database from 'better-sqlite3';
-import { join } from 'path';
+import sqlite3 from 'sqlite3';
+import { open, Database } from 'sqlite';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const DB_PATH = join(process.cwd(), 'db', 'bot.sqlite');
 
-export function initDb(): Database {
-  // Ensure db directory exists
-  const dbDir = join(process.cwd(), 'db');
-  require('fs').mkdirSync(dbDir, { recursive: true }); // Use sync for startup
+let dbInstance: Database | null = null;
 
-  const db = new Database(DB_PATH, { verbose: console.log }); // verbose logs SQL queries
+export async function initDb(): Promise<Database> {
+  if (dbInstance) {
+    return dbInstance;
+  }
 
-  // Create tables if they don't exist
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS user_configs (
-      user_id INTEGER PRIMARY KEY,
-      gemini_api_key TEXT, -- Potentially encrypted
-      prompt_system_settings TEXT, -- JSON string
-      general_settings TEXT -- JSON string (e.g., google_search_enabled)
-    );
+  const dbDir = dirname(DB_PATH);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
 
-    CREATE TABLE IF NOT EXISTS mcp_configs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      config_json TEXT NOT NULL, -- JSON string of MCPConfig
-      FOREIGN KEY (user_id) REFERENCES user_configs(user_id) ON DELETE CASCADE
-    );
+  try {
+    const db = await open({
+      filename: DB_PATH,
+      driver: sqlite3.Database,
+    });
 
-     -- Note: Conversation history structure might be more complex for efficiency
-     -- Simple version:
-    CREATE TABLE IF NOT EXISTS chat_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      chat_id INTEGER NOT NULL,
-      message_index INTEGER NOT NULL, -- Order within the chat
-      role TEXT NOT NULL, -- 'user' or 'model'
-      content_json TEXT NOT NULL, -- JSON string of message content (text, parts, function calls/responses)
-      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(chat_id, message_index) -- Ensure order is unique per chat
-    );
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS user_configs (
+        user_id INTEGER PRIMARY KEY,
+        gemini_api_key TEXT, 
+        prompt_system_settings TEXT, 
+        general_settings TEXT 
+      );
 
-  `);
+      CREATE TABLE IF NOT EXISTS mcp_configs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        config_json TEXT NOT NULL, 
+        FOREIGN KEY (user_id) REFERENCES user_configs(user_id) ON DELETE CASCADE
+      );
 
-  console.log('Database initialized.');
-  return db;
+      CREATE TABLE IF NOT EXISTS chat_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id INTEGER NOT NULL,
+        message_index INTEGER NOT NULL, 
+        role TEXT NOT NULL, 
+        content_json TEXT NOT NULL, 
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(chat_id, message_index) 
+      );
+    `);
+
+    console.log('Database initialized successfully.');
+    dbInstance = db;
+    return db;
+  } catch (error) {
+    console.error('Failed to initialize database:', error);
+    process.exit(1); 
+  }
 }
 
-// TODO: Add specific DB access functions in other modules (e.g., storage.ts, conversation.ts)
-// This file only handles initialization and getting the DB instance.
+export async function getDb(): Promise<Database> {
+  if (!dbInstance) {
+    return await initDb();
+  }
+  return dbInstance;
+}
+
+export async function closeDb(): Promise<void> {
+  if (dbInstance) {
+    await dbInstance.close();
+    dbInstance = null;
+    console.log('Database connection closed.');
+  }
+}

@@ -92,7 +92,7 @@ export function setupMessageHandlers(
         }
 
         // Add Gemini's function call response and the tool results to history
-         await conversationManager.addMessage(chatId, { role: 'model', parts: geminiResponse.functionCalls.map(fc => ({ functionCall: fc })) });
+         await conversationManager.addMessage(chatId, { role: 'model', parts: geminiResponse.functionCalls.map((fc: any) => ({ functionCall: fc })) });
          // Add tool results as user role for Gemini's follow-up turn
          await conversationManager.addMessage(chatId, { role: 'user', parts: toolResults.map(tr => ({ functionResponse: tr })) });
 

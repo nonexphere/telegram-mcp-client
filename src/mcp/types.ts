@@ -1,4 +1,3 @@
-typescript
 // Define the structure for MCP server configurations
 export interface MCPConfig {
   name: string;

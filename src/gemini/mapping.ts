@@ -8,7 +8,7 @@ interface McpTool {
     inputSchema: any; // JSONSchema7 structure
     // annotations?: any; // MCP specific, not directly mapped
 }
-import { JSONSchema7 } from 'json-schema'; // Assuming MCP uses JSON Schema Draft 7
+import type { JSONSchema7 } from 'json-schema'; // Assuming MCP uses JSON Schema Draft 7
 
 // Helper function to map JSONSchema7 types to Gemini FunctionDeclaration parameter types
 // Now using the public Type enum

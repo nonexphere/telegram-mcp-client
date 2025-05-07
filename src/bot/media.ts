@@ -17,6 +17,10 @@ export function setupMediaHandlers(
 
   // Helper to process media common steps
   const processMedia = async (ctx: Context, fileId: string, mimeType: string, caption?: string) => {
+    if (!ctx.chat || !ctx.from) {
+      console.warn('Received media without chat or from context:', ctx);
+      return;
+    }
     const chatId = ctx.chat.id;
     const userId = ctx.from.id; // Use user ID for settings/MCPs
 
