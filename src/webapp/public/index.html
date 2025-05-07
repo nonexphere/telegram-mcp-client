@@ -30,6 +30,10 @@ html
                     <label for="system-instruction">System Instruction:</label>
                     <textarea id="system-instruction" name="systemInstruction" placeholder="You are a helpful AI assistant..."></textarea>
                 </div>
+                <div>
+                    <label for="safety-settings">Safety Settings (JSON):</label>
+                    <textarea id="safety-settings" name="safetySettings" placeholder='[{"category": "HARM_CATEGORY_...", "threshold": "BLOCK_..."}]'></textarea>
+                </div>
                  <div>
                     <label for="google-search-enabled">Enable Google Search:</label>
                     <input type="checkbox" id="google-search-enabled" name="googleSearchEnabled">
@@ -59,11 +63,16 @@ html
                         <option value="http">http</option>
                     </select>
                 </div>
-                 <div id="stdio-config-fields" class="config-fields">
-                    <div>
-                        <label for="mcp-command">Command:</label>
-                        <input type="text" id="mcp-command" name="command">
-                    </div>
+                 <!-- Stdio fields - Command might become a dropdown or hidden based on selected type -->
+                 <div id="stdio-config-fields" class="config-fields hidden">
+                     <div>
+                         <label for="mcp-stdio-type">Stdio Server Type:</label>
+                         <select id="mcp-stdio-type" name="stdioServerType">
+                             <option value="">-- Select Type --</option>
+                             <option value="npx-filesystem">Filesystem (via npx)</option>
+                             <!-- Add other predefined/allowed stdio types here -->
+                         </select>
+                     </div>
                     <div>
                         <label for="mcp-args">Args (JSON array):</label>
                         <input type="text" id="mcp-args" name="args" placeholder='["-y", "@mcp/server-name"]'>

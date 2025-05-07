@@ -1,15 +1,13 @@
-// This module manages user conversation history using the database.
+/**
+ * @file Manages user conversation history using the Prisma database client.
+ */
 
 import type { PrismaClient, Prisma } from '@prisma/client';
-// Interfaces ChatHistoryRow and LastMessageRow might not be strictly needed
-// if relying on Prisma's generated types, but kept if used for casting or clarity.
-// interface ChatHistoryRow {
-//   role: string;
-//   contentJson: Prisma.JsonValue; // Prisma's JsonValue type
-// }
-// interface LastMessageRow {
-//   message_index: number; // Prisma schema uses messageIndex
-// }
+
+/**
+ * Handles reading, writing, and clearing conversation history for chats.
+ * Uses Prisma for database interactions.
+ */
 export class ConversationManager {
   private db: PrismaClient;
 
@@ -17,6 +15,11 @@ export class ConversationManager {
     this.db = db;
   }
 
+    /**
+     * Retrieves the conversation history for a given chat ID, ordered by message index.
+     * @param chatId - The ID of the chat.
+     * @returns A promise resolving to an array of message objects (role, parts).
+     */
     async getHistory(chatId: number): Promise<any[]> {
         try {
             const rows = await this.db.chatHistory.findMany({
@@ -38,6 +41,12 @@ export class ConversationManager {
         }
     }
 
+    /**
+     * Adds a new message to the conversation history for a given chat ID.
+     * Automatically determines the next message index.
+     * @param chatId - The ID of the chat.
+     * @param message - The message object (containing role and parts).
+     */
     async addMessage(chatId: number, message: any): Promise<void> {
         try {
             const lastMessage = await this.db.chatHistory.findFirst({
@@ -62,6 +71,10 @@ export class ConversationManager {
         }
     }
 
+    /**
+     * Clears the entire conversation history for a given chat ID.
+     * @param chatId - The ID of the chat to clear.
+     */
     async clearHistory(chatId: number): Promise<void> {
         try {
             await this.db.chatHistory.deleteMany({ where: { chatId } });

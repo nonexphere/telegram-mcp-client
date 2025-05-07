@@ -1,5 +1,9 @@
-import { FunctionDeclaration, Type } from '@google/genai/node'; // Changed from '@google/genai'
+/**
+ * @file Maps Model Context Protocol (MCP) Tool schemas to Google Gemini FunctionDeclarations.
+ */
 
+import { FunctionDeclaration, Type } from '@google/genai/node'; // Changed from '@google/genai'
+// TODO: Consider using zod-to-json-schema for more robust conversion if MCP SDK exposes zod schemas directly.
 // Assuming MCP Tool is correctly imported if needed, or its structure is known.
 // For this mapping, we only need the structure of MCP's Tool, which we assume is similar to:
 interface McpTool {
@@ -10,8 +14,12 @@ interface McpTool {
 }
 import type { JSONSchema7 } from 'json-schema'; // Assuming MCP uses JSON Schema Draft 7
 
-// Helper function to map JSONSchema7 types to Gemini FunctionDeclaration parameter types
-// Now using the public Type enum
+/**
+ * Maps a JSONSchema7 type string to the corresponding Gemini API Type enum.
+ * Falls back to STRING for unsupported types.
+ * @param schemaType - The JSONSchema7 type string (e.g., 'string', 'number', 'object').
+ * @returns The corresponding Gemini Type enum value.
+ */
 function mapJsonSchemaTypeToGeminiType(schemaType: JSONSchema7['type']): Type {
   switch (schemaType) {
     case 'string':
@@ -35,7 +43,12 @@ function mapJsonSchemaTypeToGeminiType(schemaType: JSONSchema7['type']): Type {
   }
 }
 
-// Recursive helper to map JSONSchema7 properties to Gemini ParameterSpec properties structure
+/**
+ * Maps JSONSchema7 properties object to the Gemini FunctionDeclaration parameter properties structure.
+ * Recursively maps nested properties if needed (though Gemini schema depth is limited).
+ * @param properties - The JSONSchema7 properties object.
+ * @returns The Gemini parameter properties object or undefined.
+ */
 function mapJsonSchemaPropertiesToGeminiParameterProps(
   properties: { [key: string]: JSONSchema7 } | undefined
 ): { [key: string]: { type: Type; description?: string; enum?: string[] } } | undefined { // Simplified type for Gemini props
@@ -57,7 +70,12 @@ function mapJsonSchemaPropertiesToGeminiParameterProps(
   return geminiProperties;
 }
 
-// Helper to map JSONSchema7 items to Gemini ParameterSpec items structure (for arrays)
+/**
+ * Maps a JSONSchema7 'items' definition (for arrays) to the Gemini FunctionDeclaration parameter items structure.
+ * Assumes 'items' is a single schema object, not an array of schemas.
+ * @param items - The JSONSchema7 items definition.
+ * @returns The Gemini parameter items object or undefined.
+ */
 function mapJsonSchemaItemsToGeminiParameterItems(
   items: JSONSchema7 | JSONSchema7[] | undefined
 ): { type: Type; description?: string; enum?: string[] } | undefined { // Simplified type for Gemini items value
@@ -72,8 +90,14 @@ function mapJsonSchemaItemsToGeminiParameterItems(
   };
 }
 
-
-// Maps an MCP Tool object to a Gemini FunctionDeclaration object
+/**
+ * Maps an MCP Tool object (containing a JSONSchema7 input schema) to a Gemini FunctionDeclaration object.
+ * Handles mapping of type, description, properties, items, required fields, and enums.
+ * Appends the serverName to the tool name for routing purposes.
+ * @param tool - The MCP Tool object.
+ * @param serverName - The name of the MCP server providing the tool.
+ * @returns A Gemini FunctionDeclaration object.
+ */
 export function mapMcpToolToGeminiFunctionDeclaration(tool: McpTool, serverName: string): FunctionDeclaration {
   try {
     // Ensure inputSchema is treated as a JSONSchema7 object

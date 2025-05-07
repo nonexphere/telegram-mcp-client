@@ -69,7 +69,4 @@ A Telegram bot that acts as an MCP client, integrating with Gemini-2.5-Pro for n
         ```bash
         npx prisma generate
         ```
-6.  **Run the bot:**
-    ```bash
-    npm start
-    ```
+```

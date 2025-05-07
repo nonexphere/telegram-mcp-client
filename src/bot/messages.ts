@@ -130,7 +130,7 @@ export function setupMessageHandlers(
 
     } catch (error: any) {
       console.error('Error during message processing for chat', chatId, ':', error);
-      ctx.reply(`An error occurred while processing your request: ${error.message || 'See logs.'}`);
+      ctx.reply('An error occurred while processing your request. Please try again later or contact support if the issue persists.');
        // Consider adding an error marker to history or clearing history for this chat
        // await conversationManager.addMessage(chatId, { role: 'model', parts: [{ text: `Error: ${error.message}` }] }); // Add error to history
     }

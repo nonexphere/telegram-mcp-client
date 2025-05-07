@@ -9,6 +9,10 @@ export interface GeneralUserSettings {
     geminiModel?: string; // Preferred Gemini model
     temperature?: number; // Gemini temperature
     maxOutputTokens?: number; // Gemini max output tokens
+    safetySettings?: Array<{ // For Gemini safety settings
+        category: string; // e.g., "HARM_CATEGORY_SEXUALLY_EXPLICIT"
+        threshold: string; // e.g., "BLOCK_MEDIUM_AND_ABOVE"
+    }>;
     googleSearchEnabled?: boolean; // Flag to enable Google Search tool if available
     // Add other general settings here
 }

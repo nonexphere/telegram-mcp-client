@@ -13,6 +13,7 @@ const addMcpForm = document.getElementById('add-mcp-form');
 const mcpTypeSelect = document.getElementById('mcp-type');
 const stdioFields = document.getElementById('stdio-config-fields');
 const httpFields = document.getElementById('http-config-fields');
+const stdioTypeSelect = document.getElementById('mcp-stdio-type'); // Dropdown for stdio types
 const clearHistoryButton = document.getElementById('clear-history');
 
 
@@ -21,14 +22,12 @@ mcpTypeSelect.addEventListener('change', (event) => {
     if (event.target.value === 'stdio') {
         stdioFields.classList.remove('hidden');
         httpFields.classList.add('hidden');
-         // Set required attribute on relevant inputs
-         document.getElementById('mcp-command').setAttribute('required', 'true');
+         stdioTypeSelect.setAttribute('required', 'true'); // Require selecting a type
          document.getElementById('mcp-url').removeAttribute('required');
     } else { // http
         stdioFields.classList.add('hidden');
         httpFields.classList.remove('hidden');
-         // Set required attribute on relevant inputs
-         document.getElementById('mcp-command').removeAttribute('required');
+         stdioTypeSelect.removeAttribute('required');
          document.getElementById('mcp-url').setAttribute('required', 'true');
     }
 });
@@ -41,9 +40,14 @@ mcpTypeSelect.dispatchEvent(new Event('change'));
 async function loadConfig() {
     try {
         // TODO: Pass initData securely (e.g., in a header)
-        const response = await fetch('/api/user_config?initData=' + app.initData); // Example passing in query
+        const response = await fetch('/api/user_config', { // Example passing in query
+            headers: {
+                'X-Telegram-Init-Data': app.initData
+            }
+        });
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorBody = await response.json().catch(() => ({ error: `HTTP error! status: ${response.status}` }));
+            throw new Error(errorBody.error);
         }
         const config = await response.json();
         console.log('Loaded config:', config);
@@ -54,6 +58,7 @@ async function loadConfig() {
         document.getElementById('gemini-model').value = settings.generalSettings.geminiModel || '';
         document.getElementById('temperature').value = settings.generalSettings.temperature ?? ''; // Use ?? for null/undefined
         document.getElementById('system-instruction').value = settings.promptSystemSettings.systemInstruction || '';
+        document.getElementById('safety-settings').value = settings.generalSettings.safetySettings ? JSON.stringify(settings.generalSettings.safetySettings, null, 2) : '';
         document.getElementById('google-search-enabled').checked = settings.generalSettings.googleSearchEnabled ?? false;
 
 
@@ -94,10 +99,19 @@ settingsForm.addEventListener('submit', async (event) => {
          generalSettings: {
              geminiModel: formData.get('geminiModel'),
              temperature: parseFloat(formData.get('temperature')), // Parse to number
+             safetySettings: undefined, // Will be populated if valid JSON
              googleSearchEnabled: formData.get('googleSearchEnabled') === 'on', // Checkbox value
               // Add other general settings here
          }
     };
+    const safetySettingsString = formData.get('safetySettings');
+    if (safetySettingsString) {
+        try {
+            settings.generalSettings.safetySettings = JSON.parse(safetySettingsString);
+        } catch (e) {
+            app.showAlert('Invalid JSON for Safety Settings. Please correct it or leave it empty.'); return;
+        }
+    }
 
     // Clean up empty fields before sending
     for (const key in settings.promptSystemSettings) {
@@ -109,12 +123,11 @@ settingsForm.addEventListener('submit', async (event) => {
     // Note: Handling geminiApiKey secure transmission/storage is critical.
 
     try {
-        // TODO: Pass initData securely (e.g., in a header)
-        const response = await fetch('/api/user_settings?initData=' + app.initData, { // Example passing in query
+        const response = await fetch('/api/user_settings', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                 // 'X-Telegram-Init-Data': app.initData // More secure way
+                 'X-Telegram-Init-Data': app.initData
             },
             body: JSON.stringify(settings)
         });
@@ -147,10 +160,21 @@ addMcpForm.addEventListener('submit', async (event) => {
     const type = formData.get('type');
 
     const config = {
-         name: formData.get('name'),
-         type: type,
-         // Add other fields based on type
+        name: formData.get('name'),
+        type: type,
+        // Stdio fields are now derived from stdioServerType
+        command: undefined,
+        args: undefined,
+        env: undefined,
+        // Http fields
+        url: undefined,
     };
+
+    // Basic validation
+    if (!config.name || !config.type) {
+        app.showAlert('Please provide a server name and select a transport type.');
+        return;
+    }
 
     if (type === 'stdio') {
         config.command = formData.get('command');
@@ -158,6 +182,7 @@ addMcpForm.addEventListener('submit', async (event) => {
         try {
             const args = formData.get('args');
              config.args = args ? JSON.parse(args) : undefined;
+            // TODO: Add validation specific to the selected stdioServerType if needed
         } catch (e) {
              app.showAlert('Invalid JSON for Args field.');
              return;
@@ -165,9 +190,25 @@ addMcpForm.addEventListener('submit', async (event) => {
          try {
             const env = formData.get('env');
              config.env = env ? JSON.parse(env) : undefined;
+            // TODO: Add validation specific to the selected stdioServerType if needed
         } catch (e) {
              app.showAlert('Invalid JSON for Env field.');
              return;
+        }
+
+        // --- Derive command/args based on selected stdio type ---
+        const stdioServerType = formData.get('stdioServerType');
+        if (!stdioServerType) {
+            app.showAlert('Please select a Stdio Server Type.');
+            return;
+        }
+        if (stdioServerType === 'npx-filesystem') {
+            config.command = 'npx'; // Command is now fixed based on type
+            // Args might be partially fixed, partially from input, needs careful design
+            // For now, keep args from the form, but backend MUST validate them
+        } else {
+            app.showAlert(`Unknown stdio server type: ${stdioServerType}`);
+            return;
         }
 
     } else if (type === 'http') {
@@ -177,21 +218,12 @@ addMcpForm.addEventListener('submit', async (event) => {
          return;
     }
 
-
-    // Basic validation
-    if (!config.name || !config.type || (config.type === 'stdio' && !config.command) || (config.type === 'http' && !config.url)) {
-         app.showAlert('Please fill all required fields.');
-         return;
-    }
-
-
     try {
-        // TODO: Pass initData securely (e.g., in a header)
-        const response = await fetch('/api/mcps?initData=' + app.initData, { // Example passing in query
+        const response = await fetch('/api/mcps', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                 // 'X-Telegram-Init-Data': app.initData // More secure way
+                 'X-Telegram-Init-Data': app.initData
             },
             body: JSON.stringify(config)
         });
@@ -224,11 +256,10 @@ async function deleteMcp(event) {
     app.showConfirm(`Are you sure you want to delete server "${serverName}"?`, async (confirmed) => {
         if (confirmed) {
             try {
-                // TODO: Pass initData securely (e.g., in a header)
-                const response = await fetch(`/api/mcps/${serverName}?initData=` + app.initData, { // Example passing in query
+                const response = await fetch(`/api/mcps/${serverName}`, {
                     method: 'DELETE',
                      headers: {
-                         // 'X-Telegram-Init-Data': app.initData // More secure way
+                         'X-Telegram-Init-Data': app.initData
                      }
                 });
 
@@ -254,8 +285,29 @@ async function deleteMcp(event) {
     });
 }
 
-// TODO: Add event listener for clear history button
-// clearHistoryButton.addEventListener('click', async () => { ... call API endpoint ... });
+clearHistoryButton.addEventListener('click', async () => {
+    app.showConfirm('Are you sure you want to clear your chat history with this bot?', async (confirmed) => {
+        if (confirmed) {
+            try {
+                const response = await fetch('/api/clear_history', {
+                    method: 'POST',
+                    headers: {
+                        'X-Telegram-Init-Data': app.initData
+                    }
+                });
+                const result = await response.json();
+                if (response.ok && result.success) {
+                    app.showNotification({ message: 'Chat history cleared!', type: 'success' });
+                } else {
+                    throw new Error(result.error || 'Failed to clear history.');
+                }
+            } catch (error) {
+                console.error('Error clearing history:', error);
+                app.showNotification({ message: 'Failed to clear history: ' + error.message, type: 'error' });
+            }
+        }
+    });
+});
 
 
 // Load initial configuration on page load
