@@ -57,7 +57,7 @@ export function setupMessageHandlers(
           try {
             // Call the corresponding MCP tool via the manager
             // The manager routes the call to the correct client instance for this user
-            const mcpToolResult = await mcpClientManager.callTool(chatId, functionCall); // Pass user ID
+            const mcpToolResult = await mcpClientManager.callTool(userId, functionCall); // Pass user ID
 
             // Store result in a format Gemini understands (functionResponse)
             const geminiFunctionResponse: { name: string; response: { result?: any; error?: string } } = {

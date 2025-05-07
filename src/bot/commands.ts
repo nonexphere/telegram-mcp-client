@@ -42,7 +42,8 @@ export function setupCommands(
    // /list_mcps command is now handled by querying the manager with user ID
    bot.command('list_mcps', async (ctx) => {
         const chatId = ctx.chat.id; // Or ctx.from.id for user-specific, decide on scope
-        const servers = await mcpClientManager.listServers(chatId); // Get user-specific servers
+        const userId = ctx.from.id;
+        const servers = await mcpClientManager.listServers(userId); // Get user-specific servers
 
         if (servers.length === 0) {
             ctx.reply('You have no MCP servers configured.');

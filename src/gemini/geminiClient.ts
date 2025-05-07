@@ -5,6 +5,50 @@ import {
     Tool,
 } from '@google/genai/node';
 import { UserConfiguration } from '../context/types.js'; // Import user config type
+import crypto from 'crypto';
+
+const ALGORITHM = 'aes-256-cbc';
+let ENCRYPTION_KEY: Buffer | null = null;
+let ENCRYPTION_IV: Buffer | null = null;
+
+if (process.env.ENCRYPTION_KEY) {
+    if (process.env.ENCRYPTION_KEY.length === 64 && /^[0-9a-fA-F]+$/.test(process.env.ENCRYPTION_KEY)) {
+        ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
+    } else {
+        console.error('ERROR: ENCRYPTION_KEY is set but not a 64-character hex string. API keys will not be securely decrypted.');
+    }
+}
+if (process.env.ENCRYPTION_IV) {
+    if (process.env.ENCRYPTION_IV.length === 32 && /^[0-9a-fA-F]+$/.test(process.env.ENCRYPTION_IV)) {
+        ENCRYPTION_IV = Buffer.from(process.env.ENCRYPTION_IV, 'hex');
+    } else {
+        console.error('ERROR: ENCRYPTION_IV is set but not a 32-character hex string. API keys will not be securely decrypted.');
+    }
+}
+
+function decrypt(encryptedText: string): string {
+    if (!ENCRYPTION_KEY || !ENCRYPTION_IV || !encryptedText) {
+        if (!encryptedText) return encryptedText; // if text is null/undefined, return as is
+        // If keys are missing, assume plaintext. Warning about plaintext storage is in McpConfigStorage.
+        return encryptedText;
+    }
+    try {
+        // A simple check to see if it might be hex. If not, assume plaintext.
+        // This is not foolproof but helps avoid errors if a plaintext key was stored.
+        if (!/^[0-9a-fA-F]+$/.test(encryptedText) || encryptedText.length < 32) { // Encrypted keys are usually longer
+            return encryptedText; // Likely plaintext
+        }
+        const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, ENCRYPTION_IV);
+        let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch (error) {
+        // If decryption fails, it might be because the key was stored as plaintext
+        // or the key/IV is wrong for this specific encrypted string.
+        // console.warn("Decryption failed, attempting to use as plaintext. This might happen if the key was stored as plaintext or if encryption settings changed.", error);
+        return encryptedText; // Fallback to using the text as is
+    }
+}
 
 export class GeminiClient {
   private geminiShared?: GoogleGenAI; 
@@ -23,14 +67,20 @@ export class GeminiClient {
 
   private getGeminiInstance(userConfig?: UserConfiguration): GoogleGenAI {
     if (userConfig?.geminiApiKey) {
-      if (!this.userGeminiInstances.has(userConfig.userId)) {
-        console.log(`Creating new Gemini instance for user ${userConfig.userId}`);
-        this.userGeminiInstances.set(
-          userConfig.userId,
-          new GoogleGenAI({ apiKey: userConfig.geminiApiKey }),
-        );
-      }
-      return this.userGeminiInstances.get(userConfig.userId)!;
+        let apiKey = userConfig.geminiApiKey;
+        if (ENCRYPTION_KEY && ENCRYPTION_IV) {
+            apiKey = decrypt(apiKey);
+        } // If keys not set, apiKey is used as is (assumed plaintext)
+
+        if (!this.userGeminiInstances.has(userConfig.userId) || 
+            (this.userGeminiInstances.get(userConfig.userId) as any)?.options?.apiKey !== apiKey) { // Check if key changed
+            console.log(`Creating or updating Gemini instance for user ${userConfig.userId}`);
+            this.userGeminiInstances.set(
+                userConfig.userId,
+                new GoogleGenAI({ apiKey }),
+            );
+        }
+        return this.userGeminiInstances.get(userConfig.userId)!;
     } else if (this.geminiShared) {
       return this.geminiShared;
     } else {

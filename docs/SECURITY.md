@@ -21,6 +21,7 @@ The Mini App UI is the primary attack surface for user configuration.
 Handling API keys (Gemini, potentially MCP server keys) is sensitive.
 
 *   **Storage:** If storing per-user Gemini API keys or keys for MCP servers in the database, they **MUST be encrypted at rest**. Use a strong encryption library in your Node.js backend. Decrypt keys only when needed (e.g., to initialize a Gemini client or launch an stdio MCP server process).
+    *   This project uses AES-256-CBC for encrypting user-specific Gemini API keys. This requires `ENCRYPTION_KEY` (64-character hex string for a 32-byte key) and `ENCRYPTION_IV` (32-character hex string for a 16-byte IV) to be set as environment variables. If these are not set or are invalid, API keys will be stored in plaintext as a fallback, and a warning will be logged.
 *   **Transmission:** Be extremely cautious about transmitting API keys.
     *   Mini App frontend to backend: Transmit over HTTPS. Consider temporary tokens or other secure methods instead of sending the raw key repeatedly. Clearing the key from the input field after saving is a good UI practice but doesn't secure the transmission.
     *   Backend to MCP server: For stdio servers, keys might be passed via environment variables. Ensure these don't end up in logs. For http servers, keys are often in headers (ensure HTTPS for the MCP server connection).

@@ -1,6 +1,45 @@
 import type { PrismaClient, Prisma } from '@prisma/client';
 import { MCPConfig, MCPConfigWithOptionalName } from './types.js';
 import { UserConfiguration } from '../context/types.js';
+import crypto from 'crypto';
+
+const ALGORITHM = 'aes-256-cbc';
+let ENCRYPTION_KEY: Buffer | null = null;
+let ENCRYPTION_IV: Buffer | null = null;
+
+if (process.env.ENCRYPTION_KEY) {
+    if (process.env.ENCRYPTION_KEY.length === 64 && /^[0-9a-fA-F]+$/.test(process.env.ENCRYPTION_KEY)) {
+        ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'hex');
+    } else {
+        console.error('ERROR: ENCRYPTION_KEY is set but not a 64-character hex string. API keys will not be securely encrypted.');
+    }
+}
+if (process.env.ENCRYPTION_IV) {
+    if (process.env.ENCRYPTION_IV.length === 32 && /^[0-9a-fA-F]+$/.test(process.env.ENCRYPTION_IV)) {
+        ENCRYPTION_IV = Buffer.from(process.env.ENCRYPTION_IV, 'hex');
+    } else {
+        console.error('ERROR: ENCRYPTION_IV is set but not a 32-character hex string. API keys will not be securely encrypted.');
+    }
+}
+
+function encrypt(text: string): string {
+    if (!ENCRYPTION_KEY || !ENCRYPTION_IV || !text) {
+        if (!text) return text; // if text is null/undefined, return as is
+        if (!ENCRYPTION_KEY || !ENCRYPTION_IV) {
+            console.warn('Warning: ENCRYPTION_KEY or ENCRYPTION_IV is not properly configured. User API key will be stored in plaintext if provided.');
+        }
+        return text;
+    }
+    try {
+        const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, ENCRYPTION_IV);
+        let encrypted = cipher.update(text, 'utf8', 'hex');
+        encrypted += cipher.final('hex');
+        return encrypted;
+    } catch (error) {
+        console.error("Encryption failed, storing plaintext as fallback:", error);
+        return text; // Fallback to plaintext if encryption fails
+    }
+}
 
 export class McpConfigStorage {
     private db: PrismaClient;
@@ -59,32 +98,37 @@ export class McpConfigStorage {
      // --- User Settings (Gemini Key, Prompt System, etc.) ---
      async getUserConfiguration(userId: number): Promise<UserConfiguration | null> {
          try {
-              const row = await this.db.userConfig.findUnique({
+            const row = await this.db.userConfig.findUnique({
                 where: { userId },
                 select: { geminiApiKey: true, promptSystemSettings: true, generalSettings: true }
-              });
-              if (!row) return null;
+            });
+            if (!row) return null;
 
-              const config: UserConfiguration = {
-                  userId: userId,
-                  geminiApiKey: row.geminiApiKey ?? undefined, // Handle null from DB
-                  promptSystemSettings: (row.promptSystemSettings as any) || {}, // Prisma handles JSON
-                  generalSettings: (row.generalSettings as any) || {}, // Prisma handles JSON
-              };
-              return config;
+            // Decryption will happen in GeminiClient before use
+            const config: UserConfiguration = {
+                userId: userId,
+                geminiApiKey: row.geminiApiKey ?? undefined,
+                promptSystemSettings: (row.promptSystemSettings as any) || {},
+                generalSettings: (row.generalSettings as any) || {},
+            };
+            return config;
          } catch (error) {
              console.error(`Error loading user configuration for user ${userId}:`, error);
              throw error; 
          }
      }
 
-     async saveUserConfiguration(config: UserConfiguration): Promise<void> {
-        let stmt;
+    async saveUserConfiguration(config: UserConfiguration): Promise<void> {
         try {
-            const encryptedApiKey = config.geminiApiKey; // Potentially encrypted
+            let apiKeyToSave = config.geminiApiKey;
+            if (config.geminiApiKey && ENCRYPTION_KEY && ENCRYPTION_IV) {
+                apiKeyToSave = encrypt(config.geminiApiKey);
+            } else if (config.geminiApiKey && (!ENCRYPTION_KEY || !ENCRYPTION_IV)) {
+                // Warning already logged by encrypt function or at startup
+            }
 
             const dataToSave = {
-                geminiApiKey: encryptedApiKey,
+                geminiApiKey: apiKeyToSave,
                 promptSystemSettings: (config.promptSystemSettings || {}) as Prisma.InputJsonValue,
                 generalSettings: (config.generalSettings || {}) as Prisma.InputJsonValue,
             };
@@ -98,17 +142,8 @@ export class McpConfigStorage {
         } catch (error) {
             console.error(`Error saving user configuration for user ${config.userId}:`, error);
             throw error;
-        } finally {
-            if (stmt) {
-                try {
-                    await stmt.finalize();
-                } catch (finalizeError) {
-                    console.error(`Error finalizing statement for user ${config.userId}:`, finalizeError);
-                }
-            }
         }
-     }
-
+    }
 }
 
 // Export an instance initialized with the DB

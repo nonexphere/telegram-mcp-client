@@ -73,19 +73,3 @@ A Telegram bot that acts as an MCP client, integrating with Gemini-2.5-Pro for n
     ```bash
     npm start
     ```
-    or, for development with auto-restart on file changes:
-    ```bash
-    npm run dev
-    ```
-
-7.  **Access Settings:**
-    *   Once the bot is running and the web server is accessible at the configured URL, send the `/settings` command to your bot in Telegram.
-    *   Click the "Open Settings" button in the message. This will launch the Mini App UI.
-
-## Contributing
-
-Contributions are welcome! Please follow the standard GitHub flow: fork, create a branch, make your changes, and submit a pull request.
-
-## License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
