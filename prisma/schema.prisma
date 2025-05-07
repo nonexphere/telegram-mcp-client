@@ -13,8 +13,8 @@ datasource db {
 model UserConfig {
   userId               Int         @id // Telegram User ID
   geminiApiKey         String?
-  promptSystemSettings String?   // Store as JSON string
   generalSettings      String?   // Store as JSON string
+  promptSystemSettings String?   // Store as JSON string
   mcpConfigs           McpConfig[]
 
   @@map("user_configs")
