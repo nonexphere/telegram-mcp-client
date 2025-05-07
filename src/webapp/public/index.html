@@ -1,0 +1,98 @@
+html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bot Settings</title>
+    <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+    <main>
+        <h1>Bot Configuration</h1>
+
+        <section id="settings-section">
+            <h2>General Settings</h2>
+            <form id="settings-form">
+                <div>
+                    <label for="gemini-api-key">Gemini API Key:</label>
+                    <input type="password" id="gemini-api-key" name="geminiApiKey" placeholder="Enter your Gemini API Key">
+                </div>
+                <div>
+                    <label for="gemini-model">Gemini Model:</label>
+                    <input type="text" id="gemini-model" name="geminiModel" placeholder="e.g., gemini-2.5-flash-latest">
+                </div>
+                <div>
+                    <label for="temperature">Temperature (0-1):</label>
+                    <input type="number" id="temperature" name="temperature" min="0" max="1" step="0.1" placeholder="0.7">
+                </div>
+                 <div>
+                    <label for="system-instruction">System Instruction:</label>
+                    <textarea id="system-instruction" name="systemInstruction" placeholder="You are a helpful AI assistant..."></textarea>
+                </div>
+                 <div>
+                    <label for="google-search-enabled">Enable Google Search:</label>
+                    <input type="checkbox" id="google-search-enabled" name="googleSearchEnabled">
+                </div>
+
+                <button type="submit">Save Settings</button>
+            </form>
+        </section>
+
+        <section id="mcps-section">
+            <h2>MCP Servers</h2>
+            <ul id="mcp-list">
+                <!-- MCP servers will be listed here -->
+                <li>Loading...</li>
+            </ul>
+
+            <h3>Add New MCP Server</h3>
+            <form id="add-mcp-form">
+                <div>
+                    <label for="mcp-name">Server Name:</label>
+                    <input type="text" id="mcp-name" name="name" required>
+                </div>
+                <div>
+                    <label for="mcp-type">Transport Type:</label>
+                    <select id="mcp-type" name="type" required>
+                        <option value="stdio">stdio</option>
+                        <option value="http">http</option>
+                    </select>
+                </div>
+                 <div id="stdio-config-fields" class="config-fields">
+                    <div>
+                        <label for="mcp-command">Command:</label>
+                        <input type="text" id="mcp-command" name="command">
+                    </div>
+                    <div>
+                        <label for="mcp-args">Args (JSON array):</label>
+                        <input type="text" id="mcp-args" name="args" placeholder='["-y", "@mcp/server-name"]'>
+                    </div>
+                    <div>
+                         <label for="mcp-env">Env (JSON object):</label>
+                         <input type="text" id="mcp-env" name="env" placeholder='{"API_KEY": "..."}'>
+                    </div>
+                </div>
+                <div id="http-config-fields" class="config-fields hidden">
+                    <div>
+                        <label for="mcp-url">URL:</label>
+                        <input type="url" id="mcp-url" name="url">
+                    </div>
+                </div>
+
+                <button type="submit">Add Server</button>
+            </form>
+        </section>
+
+         <!-- Optional: Add section for chat history management -->
+         <section id="history-section">
+             <h2>Chat History</h2>
+             <button id="clear-history">Clear Chat History</button>
+         </section>
+
+    </main>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="./script.js" type="module"></script>
+</body>
+</html>

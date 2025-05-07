@@ -1,0 +1,5 @@
+.aider*
+node_modules/
+dist/
+.env
+db/bot.sqlite* # Ignore the SQLite database file

@@ -1,0 +1,114 @@
+css
+body {
+    font-family: sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 20px;
+    background-color: var(--tg-theme-bg-color, #f0f0f0);
+    color: var(--tg-theme-text-color, #333);
+}
+
+main {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+h1, h2, h3 {
+    color: var(--tg-theme-text-color, #333);
+    border-bottom: 1px solid var(--tg-theme-border-color, #ccc);
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+}
+
+section {
+    margin-bottom: 40px;
+    padding: 20px;
+    background-color: var(--tg-theme-secondary-bg-color, #fff);
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+form div {
+    margin-bottom: 15px;
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    color: var(--tg-theme-text-color, #333);
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="url"],
+textarea,
+select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--tg-theme-border-color, #ccc);
+    border-radius: 4px;
+    box-sizing: border-box; /* Include padding in width */
+    background-color: var(--tg-theme-section-bg-color, #eee);
+    color: var(--tg-theme-text-color, #333);
+}
+
+textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+button {
+    display: inline-block;
+    background-color: var(--tg-theme-button-color, #007bff);
+    color: var(--tg-theme-button-text-color, #fff);
+    padding: 10px 15px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.3s ease;
+}
+
+button:hover {
+    background-color: color-mix(in srgb, var(--tg-theme-button-color, #007bff) 80%, black);
+}
+
+button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+.hidden {
+    display: none;
+}
+
+#mcp-list {
+    list-style: none;
+    padding: 0;
+}
+
+#mcp-list li {
+    background-color: var(--tg-theme-section-separator-color, #f8f8f8);
+    border: 1px solid var(--tg-theme-border-color, #ccc);
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#mcp-list li span {
+    flex-grow: 1;
+    margin-right: 10px;
+    word-break: break-all; /* Prevent long names from overflowing */
+}
+
+#mcp-list li button {
+    background-color: var(--tg-theme-destructive-text-color, #dc3545); /* Red color for delete */
+    color: var(--tg-theme-button-text-color, #fff);
+    padding: 5px 10px;
+    font-size: 14px;
+}
