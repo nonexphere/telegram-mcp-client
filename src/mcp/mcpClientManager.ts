@@ -4,7 +4,7 @@
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'; // Import only StdioClientTransport
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { PrismaClient } from '@prisma/client';
 import { MCPConfig, MCPConfigWithOptionalName } from './types.js';
@@ -22,11 +22,11 @@ import { IOType } from 'node:child_process';
 type UserClientsMap = Map<string, { config: MCPConfig; client: Client | null }>; // client can be null
 
 // Copied StdioServerParameters type definition locally as a workaround for import issues.
-// Adjusted env to match SDK expectations: Record<string, string>
+// Adjusted env to match SDK expectations: Record<string, string | undefined> to Record<string, string>
 type StdioServerParameters = {
     command: string;
     args?: string[];
-    env?: Record<string, string>; // SDK likely expects env values to be strings
+    env?: Record<string, string>;
     stderr?: IOType | Stream | number;
     cwd?: string;
 };
@@ -339,14 +339,14 @@ export class McpClientManager {
         const baseEnv: Record<string, string> = {};
         for (const key in process.env) {
             if (typeof process.env[key] === 'string') {
-                baseEnv[key] = process.env[key]!;
+                baseEnv[key] = process.env[key] as string;
             }
         }
         const configEnv: Record<string, string> = {};
         if (config.env) {
             for (const key in config.env) {
                 if (typeof config.env[key] === 'string') {
-                    configEnv[key] = config.env[key]!;
+                    configEnv[key] = config.env[key] as string;
                 }
             }
         }

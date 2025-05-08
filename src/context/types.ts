@@ -17,7 +17,6 @@ export interface PromptSystemSettings {
 export interface GeneralUserSettings {
     geminiModel?: string | null;
     temperature?: number | null;
-    maxOutputTokens?: number | null;
     maxOutputTokens?: number | null; // Gemini max output tokens, allow null
     safetySettings?: Array<{ // For Gemini safety settings
         category: string; // e.g., "HARM_CATEGORY_SEXUALLY_EXPLICIT"

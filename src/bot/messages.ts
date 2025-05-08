@@ -58,7 +58,8 @@ export function setupMessageHandlers(
       // Call Gemini with history, tools, and user settings.
       // Pass user settings to GeminiClient if needed for per-user configuration
       // The `multimodalParts` argument was removed from generateContent.
-      const geminiResponse = await geminiClient.generateContent(history, geminiTools, userSettings || undefined);
+      // Pass undefined for multimodalParts as this is a text message
+      const geminiResponse = await geminiClient.generateContent(history, geminiTools, undefined, userSettings || undefined);
 
       // Process Gemini's response
       // Check if Gemini requested function calls (tool usage).
@@ -118,7 +119,8 @@ export function setupMessageHandlers(
         // --- Call Gemini again with the updated history including tool results ---
         const historyWithToolResults = await conversationManager.getHistory(chatId);
         // The `multimodalParts` argument was removed from generateContent.
-        const finalGeminiResponse = await geminiClient.generateContent(historyWithToolResults, geminiTools, userSettings || undefined);
+        // Pass undefined for multimodalParts as tool results are in history
+        const finalGeminiResponse = await geminiClient.generateContent(historyWithToolResults, geminiTools, undefined, userSettings || undefined);
 
         // Get final text response from Gemini
         const finalText = finalGeminiResponse.text;

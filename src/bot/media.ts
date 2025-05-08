@@ -65,7 +65,7 @@ export async function processMediaWithToolExecution(
         // Call Gemini again with the updated history to get the final response.
         const geminiTools = await mcpClientManager.getTools(userId);
         // The `multimodalParts` argument was removed from generateContent.
-        const finalGeminiResponse = await geminiClient.generateContent(historyWithToolResults, geminiTools, userSettings || undefined);
+        const finalGeminiResponse = await geminiClient.generateContent(historyWithToolResults, geminiTools, undefined, userSettings || undefined);
 
         const finalText = finalGeminiResponse.text;
         if (finalText) {
@@ -181,7 +181,8 @@ export function setupMediaHandlers(
       // Call Gemini with history, tools, the multimodal parts for this turn, and user settings.
       // Pass user settings to GeminiClient if needed
       // The `multimodalParts` argument was removed from generateContent, history now contains these.
-      const geminiResponse = await geminiClient.generateContent(history, geminiTools, userSettings || undefined);
+      // Pass undefined for multimodalParts as they are already in history
+      const geminiResponse = await geminiClient.generateContent(history, geminiTools, undefined, userSettings || undefined);
 
        // Use the refactored tool execution logic
        await _processMediaWithToolExecution(ctx, geminiResponse, chatId, userId, mcpClientManager, geminiClient, conversationManager, userSettings);

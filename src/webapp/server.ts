@@ -221,7 +221,7 @@ export function setupWebAppServer(
          * @returns {object} 500 - Internal server error.
          */
         const userId = (req as any).telegramUserId;
-        let existingConfig: UserConfiguration | null = null; // FIX: Declare existingConfig outside try
+        let existingConfig: UserConfiguration | null = null;
 
         try {
             // Validate payload with Zod
@@ -233,53 +233,42 @@ export function setupWebAppServer(
             const updatedSettingsBody = validationResult.data;
 
             existingConfig = await mcpConfigStorage.getUserConfiguration(userId); // FIX: Assign fetched config
+            const currentPromptSettings = existingConfig?.promptSystemSettings ?? {};
+            const currentGeneralSettings = existingConfig?.generalSettings ?? {};
             const currentApiKey = existingConfig?.geminiApiKey;
 
             const mergedPromptSettings: PromptSystemSettings = {
-                ...(existingConfig?.promptSystemSettings ?? {}),
+                ...currentPromptSettings,
                 ...(updatedSettingsBody.promptSystemSettings ?? {})
             };
             if (updatedSettingsBody.promptSystemSettings && 'systemInstruction' in updatedSettingsBody.promptSystemSettings) {
                  // Preserve null if provided, otherwise it's string or undefined
-                 mergedPromptSettings.systemInstruction = updatedSettingsBody.promptSystemSettings.systemInstruction;
+                 mergedPromptSettings.systemInstruction = updatedSettingsBody.promptSystemSettings.systemInstruction ?? undefined; // Ensure undefined if null from payload
             }
 
 
             const mergedGeneralSettings: GeneralUserSettings = {
-                ...(existingConfig?.generalSettings ?? {}),
+                ...currentGeneralSettings,
                 ...(updatedSettingsBody.generalSettings ?? {}),
             }; // Ensure all existing fields are carried over if not in updatedSettingsBody
 
             // Handle explicit null/undefined for specific general settings fields
              if (updatedSettingsBody.generalSettings && 'geminiModel' in updatedSettingsBody.generalSettings) {
-                 mergedGeneralSettings.geminiModel = updatedSettingsBody.generalSettings.geminiModel;
-             } else if (existingConfig?.generalSettings?.geminiModel === null && !(updatedSettingsBody.generalSettings && 'geminiModel' in updatedSettingsBody.generalSettings)) {
-                mergedGeneralSettings.geminiModel = undefined; // Ensure explicit null from DB becomes undefined if not overwritten
-            }
-
-            if (updatedSettingsBody.generalSettings && 'temperature' in updatedSettingsBody.generalSettings) { // Check existence of temperature in payload
-                 mergedGeneralSettings.temperature = updatedSettingsBody.generalSettings.temperature;
-            } else if (existingConfig?.generalSettings?.temperature === null && !(updatedSettingsBody.generalSettings && 'temperature' in updatedSettingsBody.generalSettings)) {
-                mergedGeneralSettings.temperature = undefined; // Ensure explicit null from DB becomes undefined
-            }
-
+                 mergedGeneralSettings.geminiModel = updatedSettingsBody.generalSettings.geminiModel ?? undefined;
+             }
+             if (updatedSettingsBody.generalSettings && 'temperature' in updatedSettingsBody.generalSettings) {
+                 mergedGeneralSettings.temperature = updatedSettingsBody.generalSettings.temperature ?? undefined;
+             }
              if (updatedSettingsBody.generalSettings && 'maxOutputTokens' in updatedSettingsBody.generalSettings) {
-                mergedGeneralSettings.maxOutputTokens = updatedSettingsBody.generalSettings.maxOutputTokens;
-            } else if (existingConfig?.generalSettings?.maxOutputTokens === null && !(updatedSettingsBody.generalSettings && 'maxOutputTokens' in updatedSettingsBody.generalSettings)) {
-                mergedGeneralSettings.maxOutputTokens = undefined;
+                mergedGeneralSettings.maxOutputTokens = updatedSettingsBody.generalSettings.maxOutputTokens ?? undefined;
             }
-
-            if (updatedSettingsBody.generalSettings && 'safetySettings' in updatedSettingsBody.generalSettings) { // Check existence of safetySettings in payload
-                mergedGeneralSettings.safetySettings = updatedSettingsBody.generalSettings.safetySettings;
-            } else if (existingConfig?.generalSettings?.safetySettings === null && !(updatedSettingsBody.generalSettings && 'safetySettings' in updatedSettingsBody.generalSettings)) {
-                mergedGeneralSettings.safetySettings = undefined; // Ensure explicit null from DB becomes undefined
+             if (updatedSettingsBody.generalSettings && 'safetySettings' in updatedSettingsBody.generalSettings) {
+                mergedGeneralSettings.safetySettings = updatedSettingsBody.generalSettings.safetySettings ?? undefined;
             }
-
              if (updatedSettingsBody.generalSettings && 'googleSearchEnabled' in updatedSettingsBody.generalSettings) {
-                mergedGeneralSettings.googleSearchEnabled = updatedSettingsBody.generalSettings.googleSearchEnabled;
-            } else if (existingConfig?.generalSettings?.googleSearchEnabled === null && !(updatedSettingsBody.generalSettings && 'googleSearchEnabled' in updatedSettingsBody.generalSettings)) {
-                mergedGeneralSettings.googleSearchEnabled = false; // Default to false if null and not in payload
+                mergedGeneralSettings.googleSearchEnabled = updatedSettingsBody.generalSettings.googleSearchEnabled ?? undefined;
             }
+
 
             let apiKeyToSave: string | undefined | null = currentApiKey; // Default to existing
             if (updatedSettingsBody.geminiApiKey !== undefined) { // If key is present in payload (even if null)
@@ -293,31 +282,24 @@ export function setupWebAppServer(
             const dataForUpdate: Prisma.UserConfigUpdateInput = {};
             const dataForCreate: Prisma.UserConfigCreateInput = { userId };
 
-            // Explicitly handle undefined vs null for API key
-            if (apiKeyToSave === null) { // User wants to clear the key
-                dataForUpdate.geminiApiKey = null;
-                dataForCreate.geminiApiKey = null;
-            } else if (apiKeyToSave !== undefined) { // User provided a new key (already encrypted if non-null)
+            // Handle API key for Prisma (null, undefined, or value)
+            if (apiKeyToSave !== undefined) { // if undefined, it means no change from existing or not provided
                 dataForUpdate.geminiApiKey = apiKeyToSave;
                 dataForCreate.geminiApiKey = apiKeyToSave;
             }
-            // For other settings, convert to JSON string or null if empty/undefined
-            const promptSettingsString = (mergedPromptSettings && Object.keys(mergedPromptSettings).length > 0 && (mergedPromptSettings.systemInstruction !== undefined && mergedPromptSettings.systemInstruction !== null && mergedPromptSettings.systemInstruction !== ''))
-                ? JSON.stringify(mergedPromptSettings) : null;
-            dataForUpdate.promptSystemSettings = promptSettingsString;
-            dataForCreate.promptSystemSettings = promptSettingsString;
 
-            const generalSettingsString = (mergedGeneralSettings && Object.keys(mergedGeneralSettings).length > 0 &&
-                (
-                    (mergedGeneralSettings.geminiModel !== undefined && mergedGeneralSettings.geminiModel !== null && mergedGeneralSettings.geminiModel !== '') ||
-                    (mergedGeneralSettings.temperature !== undefined && mergedGeneralSettings.temperature !== null) ||
-                    (mergedGeneralSettings.maxOutputTokens !== undefined && mergedGeneralSettings.maxOutputTokens !== null) ||
-                    (mergedGeneralSettings.safetySettings !== undefined && mergedGeneralSettings.safetySettings !== null) ||
-                    (mergedGeneralSettings.googleSearchEnabled !== undefined && mergedGeneralSettings.googleSearchEnabled !== null)
-                )
-            ) ? JSON.stringify(mergedGeneralSettings) : null;
-            dataForUpdate.generalSettings = generalSettingsString;
-            dataForCreate.generalSettings = generalSettingsString;
+            // Convert merged settings to JSON string or null if empty/all undefined
+            // PromptSystemSettings
+            const hasValidPromptSettings = Object.values(mergedPromptSettings).some(v => v !== undefined && v !== null && v !== '');
+            const promptSettingsJson = hasValidPromptSettings ? JSON.stringify(mergedPromptSettings) : null;
+            dataForUpdate.promptSystemSettings = promptSettingsJson;
+            dataForCreate.promptSystemSettings = promptSettingsJson;
+
+            // GeneralUserSettings
+            const hasValidGeneralSettings = Object.values(mergedGeneralSettings).some(v => v !== undefined && v !== null && v !== '');
+            const generalSettingsJson = hasValidGeneralSettings ? JSON.stringify(mergedGeneralSettings) : null;
+            dataForUpdate.generalSettings = generalSettingsJson;
+            dataForCreate.generalSettings = generalSettingsJson;
 
             await db.userConfig.upsert({
                 where: { userId: userId },
